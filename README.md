@@ -6,6 +6,8 @@ Everything runs in the visitor's browser (SQLite compiled to WebAssembly, inside
 
 ## Quick start
 
+**New here? Read [`docs/GUIDE.md`](docs/GUIDE.md): how to use the site, a 2-minute tour, and a manual test checklist.**
+
 Requires Node 22+ and pnpm.
 
 ```bash
