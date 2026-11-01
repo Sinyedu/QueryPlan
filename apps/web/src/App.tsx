@@ -1,4 +1,7 @@
+import { useEffect } from 'react';
 import { useLab } from './hooks/useLab';
+import { decodeShare } from './domain/experiment';
+import { ExperimentsPanel } from './components/ExperimentsPanel';
 import { PlanPanel } from './components/PlanPanel';
 import { ResultsTable } from './components/ResultsTable';
 import { SchemaBuilder } from './components/SchemaBuilder';
@@ -10,6 +13,18 @@ import { Alert, Button } from './components/ui';
 export function App() {
   const lab = useLab();
   const { info } = lab;
+  const { loadExperiment, setNotice } = lab;
+
+  // A share link carries a definition only. It is validated and loaded into the editors; nothing runs automatically.
+  useEffect(() => {
+    const code = /^#exp=(.+)$/.exec(location.hash)?.[1];
+    if (!code) return;
+    history.replaceState(null, '', location.pathname + location.search);
+    const p = decodeShare(code);
+    if (!p.ok) return setNotice(`Share link rejected: ${p.error}`);
+    loadExperiment(p.experiment);
+    setNotice(`Loaded shared experiment "${p.experiment.name}". Review its schema and SQL, then create, seed and run.`);
+  }, [loadExperiment, setNotice]);
 
   return (
     <div className="mx-auto flex min-h-screen max-w-[1600px] flex-col gap-4 p-3 sm:p-4">
@@ -34,11 +49,12 @@ export function App() {
         </div>
       )}
 
-      <main className="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(280px,360px)_minmax(0,1fr)] xl:grid-cols-[minmax(280px,360px)_minmax(0,1fr)_minmax(320px,440px)]">
+      <main className="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(300px,400px)_minmax(0,1fr)] xl:grid-cols-[minmax(300px,400px)_minmax(0,1fr)_minmax(320px,440px)]">
         <aside className="space-y-4">
           <SchemaBuilder lab={lab} />
           <SeedPanel lab={lab} />
           <Sidebar lab={lab} />
+          <ExperimentsPanel lab={lab} />
         </aside>
         <div className="min-w-0 space-y-4">
           <SqlEditor lab={lab} />

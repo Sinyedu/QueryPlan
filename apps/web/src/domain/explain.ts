@@ -75,6 +75,14 @@ export interface NodeNote {
  * columns). It describes the access path; it does not claim the plan is fast or slow.
  */
 export function describeNode(node: Pick<PlanNode, 'detail' | 'kind' | 'index'>): NodeNote {
+  if (/AUTOMATIC (COVERING )?INDEX/.test(node.detail)) {
+    return { text: 'SQLite builds a temporary index while running this query because none exists. That cost is paid on every run; a permanent index on the same columns would avoid it.' };
+  }
+  if (/^CORRELATED (SCALAR )?SUBQUERY/.test(node.detail)) return { text: 'A subquery that depends on the outer row, so it may run once per outer row.' };
+  if (/^(SCALAR|LIST) SUBQUERY/.test(node.detail)) return { text: 'A subquery evaluated on its own; SQLite typically runs it once and reuses the result.' };
+  if (/^(CO-ROUTINE|MATERIALIZE)/.test(node.detail)) return { text: 'SQLite computes this subquery or view as a separate step and feeds its rows to the outer query.' };
+  if (/^MULTI-INDEX OR/.test(node.detail)) return { text: 'An OR condition answered by combining several index lookups.' };
+  if (/^(COMPOUND QUERY|UNION|MERGE)/.test(node.detail)) return { text: 'Combines the results of several SELECTs (UNION / INTERSECT / EXCEPT).' };
   const table = /^(?:SCAN|SEARCH)\s+(\S+)/.exec(node.detail)?.[1];
   const constraint = /\(([^()]*)\)\s*$/.exec(node.detail)?.[1];
   const cols = constraint ? [...constraint.matchAll(/(\w+)\s*[=<>]/g)].map((m) => m[1]!) : [];
@@ -93,4 +101,27 @@ export function describeNode(node: Pick<PlanNode, 'detail' | 'kind' | 'index'>):
     default:
       return { text: 'No specific note for this step; read the raw SQLite detail above.' };
   }
+}
+
+/**
+ * Plan-level reading hints derived only from the plan rows (no statistics, no costs).
+ * Top-level steps of a join form nested loops: the first is the outer loop, later ones run once per outer row.
+ */
+export function planInsights(rows: readonly RawPlanRow[]): string[] {
+  const roots = parsePlan(rows);
+  const flat = flattenPlan(roots);
+  const out: string[] = [];
+  const loops = roots.filter((r) => /^(SCAN|SEARCH)\b/.test(r.detail));
+  if (loops.length > 1) {
+    out.push(`Join: ${loops.length} tables are read as nested loops, in the order listed. Each later step runs once for every row the earlier steps produce.`);
+    const innerScan = loops.slice(1).find((n) => n.kind === 'scan');
+    if (innerScan) out.push(`"${innerScan.detail}" is a full scan inside a loop, so it repeats for each outer row. This is where an index on the join column usually helps (the planner may still choose otherwise).`);
+  }
+  if (flat.some((f) => /AUTOMATIC (COVERING )?INDEX/.test(f.node.detail))) {
+    out.push('An automatic (temporary) index is built on every run; consider creating a permanent index on those columns.');
+  }
+  if (flat.some((f) => f.node.kind === 'temp-structure')) {
+    out.push('A temporary sort/group structure is used; an index matching the ORDER BY / GROUP BY columns can sometimes remove it.');
+  }
+  return out;
 }

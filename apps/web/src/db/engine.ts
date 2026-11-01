@@ -12,7 +12,8 @@ export interface DatabaseEngine {
   initialize(): Promise<EngineInfo>;
   execute(sql: string, options: ExecuteOptions): Promise<ExecuteResult>;
   explain(sql: string): Promise<ExplainResult>;
-  createTable(table: TableDef, replace: boolean): Promise<void>;
+  /** Creates all tables in dependency order; with `replace`, drops same-named existing tables first. */
+  createSchema(tables: TableDef[], replace: boolean): Promise<void>;
   seed(request: SeedRequest, onProgress?: (done: number, total: number) => void): Promise<SeedResult>;
   introspect(): Promise<SchemaInfo>;
   /** Discards all data (terminates and re-creates the worker). */

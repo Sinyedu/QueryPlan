@@ -23,15 +23,23 @@
 - [ ] Graph view was checked by an automated browser test, not reviewed visually across browsers or on a phone.
 
 ### Phase 0 — handed to Phase 1
-- [ ] Only one custom table; no foreign keys; seed value ranges/distributions are fixed per generator.
+- [x] Multiple tables, foreign keys and seed distributions (delivered in Phase 1 below).
 
 ## Phase 1 — Strong public beta
-- [ ] Multiple tables and foreign keys
-- [ ] Seed distributions and reproducible seed settings
-- [ ] Saved experiments and optional local persistence
-- [ ] Better plan tree and educational descriptions
-- [ ] Query benchmark repetitions with clear methodology
-- [ ] Shareable experiment definitions without private data
+- [x] Multiple tables and foreign keys. Up to 6 tables; a foreign key must reference another table's INTEGER PRIMARY KEY filled by the `sequence` generator (so seeded parent keys are exactly 1..N); no composite keys or ON DELETE/UPDATE actions; cycles are rejected. `PRAGMA foreign_keys = ON`, so FKs are enforced. Schema creation and seeding run in dependency order (parents first on insert, children first on delete) in one transaction; at most 30,000 rows in total.
+- [x] Seed distributions and reproducible seed settings. Editable seed (saved with experiments); per-column `uniform` or `skewed` distribution for `integer`, `word`, `city` and foreign-key columns. Dates, decimals, names and emails have no distribution option. Each table derives its own seed from (seed, table name).
+- [x] Saved experiments. Definitions (schema, row counts, seed, SQL) are stored in `localStorage` and re-validated on load.
+  - [ ] Persisting the database itself (OPFS) is NOT implemented: refresh still clears all data. Experiments regenerate it from the seed.
+- [x] Better plan tree and educational descriptions. Plan-level reading hints (nested-loop joins, inner full scans, automatic indexes, temp structures) and extra per-step notes (automatic index, subqueries, co-routines, multi-index OR, compound queries). These are text heuristics over SQLite's plan rows, verified against tests and the join example only; unusual plans fall back to the raw detail text.
+- [x] Query benchmark repetitions with clear methodology. Selectable sample count (3/5/10/20), a visible methodology section, and an environment line (browser, SQLite version, WASM/Worker/in-memory).
+- [x] Shareable experiment definitions without private data. JSON export/import and a `#exp=` link; imports and links are validated as untrusted input (size caps, enum checks, schema validation, unknown fields dropped) and only load into the editors, never auto-run SQL.
+  - [ ] Long share links can exceed URL length limits in some chat apps/browsers; export a file for large definitions.
+  - [ ] SQL inside an imported experiment runs only when the user presses Run, but it is still arbitrary SQL against the user's own in-memory database; review it before running.
+
+### Phase 1 — known gaps
+- [ ] The multi-table UI and experiments panel were checked by an automated Chrome test and at one desktop viewport; not reviewed on a phone or in Firefox/Safari.
+- [ ] Index experiment supports 1–2 column indexes only (no unique, partial or expression indexes).
+- [ ] Join benchmarks run the SQL as typed; there is no query rewriting helper.
 
 ## Phase 2 — PostgreSQL mode
 - [ ] Dedicated backend API and isolated ephemeral PostgreSQL sandboxes

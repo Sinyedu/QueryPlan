@@ -40,3 +40,8 @@ MVP: in-memory, refresh clears data. Later: opt-in OPFS where supported, with te
 - `db/sqlite-core.ts` holds all SQLite logic (Worker-independent, tested in Node); `sqlite-worker.ts` is a thin dispatcher; `sqlite-client.ts` implements `DatabaseEngine` with request IDs, progress events and a termination watchdog.
 - Hang protection: SQLite progress handler (cooperative abort, DB survives) + watchdog worker termination (DB lost).
 - `hooks/useLab.ts` owns UI state; components are presentational. `e2e/smoke.mjs` drives the production build in a real browser.
+
+## Phase 1 additions
+- The engine contract is schema-wide: `createSchema(tables, replace)` and `seed({ tables, seed })` create and fill all tables in foreign-key dependency order inside one transaction (children deleted first, parents inserted first). Foreign keys are enforced.
+- `domain/experiment.ts` is the single trust boundary for saved, imported and shared definitions (`parseExperiment`).
+- Benchmark samples are produced inside the worker (`execute` with `repeat`, read-only SELECT/WITH only) so timer resolution matters less.

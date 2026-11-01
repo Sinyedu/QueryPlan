@@ -20,7 +20,7 @@ async function handle(req: WorkerRequest): Promise<unknown> {
     case 'init': return s.info();
     case 'execute': return s.execute(req.sql, req.options);
     case 'explain': return s.explain(req.sql);
-    case 'createTable': s.createTable(req.table, req.replace); return null;
+    case 'createSchema': s.createSchema(req.tables, req.replace); return null;
     case 'seed': return s.seed(req.request, (done, total) => post({ id: req.id, type: 'progress', done, total }));
     case 'introspect': return s.introspect();
   }

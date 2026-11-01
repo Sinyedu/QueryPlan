@@ -1,7 +1,7 @@
 /** Typed message protocol between the UI thread and a database worker. Engine-neutral names. */
 import type { RawPlanRow } from '../domain/explain';
 import type { TableDef } from '../domain/schema';
-import type { SqlValue } from '../domain/seeding';
+import type { SeedTable, SqlValue } from '../domain/seeding';
 
 export type Cell = SqlValue;
 
@@ -47,6 +47,7 @@ export interface TableInfo {
   columns: { name: string; type: string; primaryKey: boolean }[];
   rowCount: number;
   indexes: IndexInfo[];
+  foreignKeys: { from: string; table: string; to: string }[];
 }
 
 export interface SchemaInfo {
@@ -54,13 +55,14 @@ export interface SchemaInfo {
 }
 
 export interface SeedRequest {
-  table: TableDef;
-  rowCount: number;
+  /** All tables to (re)fill together; parents are filled before children. */
+  tables: SeedTable[];
   seed: number;
 }
 
 export interface SeedResult {
   rowsInserted: number;
+  perTable: Record<string, number>;
   elapsedMs: number;
 }
 
@@ -74,7 +76,7 @@ export type WorkerRequest =
   | { id: number; type: 'init' }
   | { id: number; type: 'execute'; sql: string; options: ExecuteOptions }
   | { id: number; type: 'explain'; sql: string }
-  | { id: number; type: 'createTable'; table: TableDef; replace: boolean }
+  | { id: number; type: 'createSchema'; tables: TableDef[]; replace: boolean }
   | { id: number; type: 'seed'; request: SeedRequest }
   | { id: number; type: 'introspect' };
 

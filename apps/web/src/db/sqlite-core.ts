@@ -3,9 +3,9 @@
  * Uses an in-memory database; nothing persists across reloads or worker restarts.
  */
 import type { Database, Sqlite3Static } from '@sqlite.org/sqlite-wasm';
-import { buildCreateTable, buildInsert, quoteIdentifier, validateTable } from '../domain/schema';
+import { buildCreateTable, buildInsert, orderTables, quoteIdentifier, validateSchema, type TableDef } from '../domain/schema';
 import { isBenchmarkable } from '../domain/benchmark';
-import { generateBatches, clampRowCount } from '../domain/seeding';
+import { MAX_TOTAL_ROWS, clampedCounts, generateBatches, tableSeed } from '../domain/seeding';
 import type { RawPlanRow } from '../domain/explain';
 import type {
   Cell, EngineInfo, ExecuteOptions, ExecuteResult, ExplainResult, SchemaInfo, SeedRequest, SeedResult, TableInfo,
@@ -39,6 +39,7 @@ export class SqliteSession {
   constructor(private readonly sqlite3: Sqlite3Static) {
     this.db = new sqlite3.oo1.DB(':memory:', 'c');
     this.db.exec(`PRAGMA max_page_count = ${MAX_PAGES}`);
+    this.db.exec('PRAGMA foreign_keys = ON'); // declared foreign keys are really enforced
     // Cooperative time budget: returning non-zero makes SQLite abort the running statement.
     sqlite3.capi.sqlite3_progress_handler(
       this.db.pointer!,
@@ -115,41 +116,64 @@ export class SqliteSession {
     return { rows: rows.map((r) => ({ id: Number(r.id), parent: Number(r.parent), notused: Number(r.notused), detail: String(r.detail) })) };
   }
 
-  createTable(table: Parameters<typeof buildCreateTable>[0], replace: boolean): void {
-    const issues = validateTable(table);
+  private checkedOrder(tables: readonly TableDef[]): TableDef[] {
+    const issues = validateSchema(tables);
     if (issues.length) throw new SqliteCoreError(issues[0]!.message, 'validation');
+    return orderTables(tables)!;
+  }
+
+  createSchema(tables: TableDef[], replace: boolean): void {
+    const ordered = this.checkedOrder(tables);
     this.guarded(5_000, () => {
-      if (replace) this.db.exec(`DROP TABLE IF EXISTS ${quoteIdentifier(table.name)}`);
-      this.db.exec(buildCreateTable(table));
+      if (replace) {
+        // Dropping a parent while children still hold rows would trip enforcement, so drop children first with FKs off.
+        this.db.exec('PRAGMA foreign_keys = OFF');
+        try {
+          for (const t of [...ordered].reverse()) this.db.exec(`DROP TABLE IF EXISTS ${quoteIdentifier(t.name)}`);
+        } finally {
+          this.db.exec('PRAGMA foreign_keys = ON');
+        }
+      }
+      for (const t of ordered) this.db.exec(buildCreateTable(t));
     });
   }
 
-  /** Replaces the table's rows with deterministic synthetic rows, inserted in batches inside one transaction. */
-  seed({ table, rowCount, seed }: SeedRequest, onProgress: (done: number, total: number) => void): SeedResult {
-    const issues = validateTable(table);
-    if (issues.length) throw new SqliteCoreError(issues[0]!.message, 'validation');
-    const total = clampRowCount(rowCount);
+  /**
+   * Replaces the rows of every listed table with deterministic synthetic rows, inserted in batches inside ONE
+   * transaction: children are emptied first, parents are filled first, so enforced foreign keys always hold.
+   */
+  seed({ tables, seed }: SeedRequest, onProgress: (done: number, total: number) => void): SeedResult {
+    const ordered = this.checkedOrder(tables.map((t) => t.table));
+    const counts = clampedCounts(tables);
+    const total = Object.values(counts).reduce((x, y) => x + y, 0);
+    if (total > MAX_TOTAL_ROWS) {
+      throw new SqliteCoreError(`At most ${MAX_TOTAL_ROWS.toLocaleString()} rows across all tables (requested ${total.toLocaleString()}).`, 'validation');
+    }
     const start = performance.now();
     this.guarded(60_000, () => {
-      const stmt = this.db.prepare(buildInsert(table));
       this.db.exec('BEGIN');
       try {
-        this.db.exec(`DELETE FROM ${quoteIdentifier(table.name)}`);
+        for (const t of [...ordered].reverse()) this.db.exec(`DELETE FROM ${quoteIdentifier(t.name)}`);
         let done = 0;
-        for (const batch of generateBatches(table, total, seed)) {
-          for (const row of batch) stmt.bind(row).stepReset();
-          done += batch.length;
-          onProgress(done, total);
+        for (const t of ordered) {
+          const stmt = this.db.prepare(buildInsert(t));
+          try {
+            for (const batch of generateBatches(t, counts[t.name]!, tableSeed(seed, t.name), counts)) {
+              for (const row of batch) stmt.bind(row).stepReset();
+              done += batch.length;
+              onProgress(done, total);
+            }
+          } finally {
+            stmt.finalize();
+          }
         }
         this.db.exec('COMMIT');
       } catch (e) {
         this.db.exec('ROLLBACK');
         throw e;
-      } finally {
-        stmt.finalize();
       }
     });
-    return { rowsInserted: total, elapsedMs: performance.now() - start };
+    return { rowsInserted: total, perTable: counts, elapsedMs: performance.now() - start };
   }
 
   introspect(): SchemaInfo {
@@ -160,8 +184,10 @@ export class SqliteSession {
       const q = quoteIdentifier(name);
       const cols = this.db.exec({ sql: `PRAGMA table_info(${q})`, rowMode: 'object', returnValue: 'resultRows' }) as unknown as Record<string, unknown>[];
       const idx = this.db.exec({ sql: `PRAGMA index_list(${q})`, rowMode: 'object', returnValue: 'resultRows' }) as unknown as Record<string, unknown>[];
+      const fks = this.db.exec({ sql: `PRAGMA foreign_key_list(${q})`, rowMode: 'object', returnValue: 'resultRows' }) as unknown as Record<string, unknown>[];
       return {
         name,
+        foreignKeys: fks.map((f) => ({ from: String(f.from), table: String(f.table), to: String(f.to) })),
         columns: cols.map((c) => ({ name: String(c.name), type: String(c.type), primaryKey: Number(c.pk) > 0 })),
         rowCount: Number(this.db.selectValue(`SELECT count(*) FROM ${q}`)),
         indexes: idx

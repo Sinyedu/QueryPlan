@@ -10,6 +10,7 @@ export interface TimingSummary {
 }
 
 export const BENCH_RUNS = 5;
+export const BENCH_RUN_OPTIONS = [3, 5, 10, 20] as const;
 
 /** Target total time per sample; fast queries are repeated so the timer's ~0.1 ms resolution matters less. */
 export const TARGET_SAMPLE_MS = 10;

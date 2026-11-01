@@ -92,8 +92,8 @@ export class SqliteClient implements DatabaseEngine {
     return this.call({ type: 'explain', sql }, { watchdogMs: 5_000 + WATCHDOG_GRACE_MS });
   }
 
-  async createTable(table: TableDef, replace: boolean): Promise<void> {
-    await this.call({ type: 'createTable', table, replace });
+  async createSchema(tables: TableDef[], replace: boolean): Promise<void> {
+    await this.call({ type: 'createSchema', tables, replace });
   }
 
   seed(request: SeedRequest, onProgress?: (done: number, total: number) => void): Promise<SeedResult> {
