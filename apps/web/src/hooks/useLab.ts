@@ -7,6 +7,7 @@ import { DEFAULT_SEED, type SeedTable } from '../domain/seeding';
 import { BENCH_RUNS, isBenchmarkable, repsFor, summarizeTimes } from '../domain/benchmark';
 import { EXPERIMENT_VERSION, type Experiment } from '../domain/experiment';
 import { GUIDED_EXAMPLE } from '../domain/examples';
+import { useSchemaDesign } from './useSchemaDesign';
 import { DEFAULT_ROW_LIMIT, clampRowLimit } from '../domain/results';
 import { QUERY_TIMEOUT_MS, type Busy, type PlanSnapshot, type QueryState, type SeedProgress } from './types';
 
@@ -26,6 +27,8 @@ export function useLab() {
   const [notice, setNotice] = useState<string | null>(null);
   const [tableError, setTableError] = useState<string | null>(null);
   const [tables, setTables] = useState<SeedTable[]>([{ table: DEFAULT_TABLE, rowCount: 5_000 }]);
+  const design = useSchemaDesign(tables, setTables);
+  const { resetLayout } = design;
   const [seedValue, setSeedValue] = useState(DEFAULT_SEED);
   const [progress, setProgress] = useState<SeedProgress | null>(null);
   const [seedMsg, setSeedMsg] = useState<string | null>(null);
@@ -132,9 +135,9 @@ export function useLab() {
 
   /** Loads a definition into the editors without touching the database. */
   const loadExperiment = useCallback((e: Experiment) => {
-    setTables(e.tables); setSeedValue(e.seed); setSql(e.sql);
+    setTables(e.tables); setSeedValue(e.seed); setSql(e.sql); resetLayout();
     setBefore(null); setCurrent(null); setQuery({ status: 'idle' }); setTableError(null); setSeedMsg(null);
-  }, []);
+  }, [resetLayout]);
 
   /** Create all tables, seed them, then run the experiment's SQL (its first plan is the "before"). */
   const runExperiment = useCallback((e: Experiment) => run('table', async () => {
@@ -154,7 +157,7 @@ export function useLab() {
   const toExperiment = useCallback((name: string): Experiment => ({ version: EXPERIMENT_VERSION, name, tables, seed: seedValue, sql }), [tables, seedValue, sql]);
 
   return {
-    info, schema, busy, notice, setNotice, tables, setTables, tableError, schemaIssues, existing,
+    info, schema, busy, notice, setNotice, tables, setTables, design, tableError, schemaIssues, existing,
     seedValue, setSeedValue, progress, seedMsg, sql, setSql, query, current, before,
     benchRuns, setBenchRuns, rowLimit, setRowLimit, benchmarkable: isBenchmarkable(sql),
     createSchema, seed, runQuery, compareWithIndex, dropIndex, loadExperiment, runExperiment, toExperiment,

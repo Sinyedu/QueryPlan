@@ -22,6 +22,7 @@ pnpm --filter web e2e   # optional: real-browser smoke test (needs Chrome or Edg
 
 ## The journey (or press "▶ Guided example")
 
+0. Optional: open the **Designer** tab to lay out tables on a diagram and connect them by dragging from a column to another table's primary key.
 1. Edit the schema: up to 6 tables, typed columns, data generators, optional foreign keys to another table's sequence-filled integer primary key. **Create tables** (parents first).
 2. **Seed all tables**: 100–10,000 rows each (30,000 total), deterministic for a chosen seed, optional `skewed` distributions, 500-row batches in one transaction, progress bar.
 3. Run SQL (`Ctrl/⌘+Enter`). You choose how many rows to show (default 200, up to 5,000); the true row count and measured elapsed time are always shown.

@@ -36,6 +36,16 @@
   - [ ] Long share links can exceed URL length limits in some chat apps/browsers; export a file for large definitions.
   - [ ] SQL inside an imported experiment runs only when the user presses Run, but it is still arbitrary SQL against the user's own in-memory database; review it before running.
 
+### Visual designer (separate Designer view)
+- [x] A **Lab | Designer** switch in the header. The Designer shows a full-size diagram: draggable table cards, column rows with PK/FK badges, curved relationship lines with 1 / N markers, an auto-arrange button, and a relationship list.
+- [x] Drag from the dot on a column to another table's primary-key row to make a foreign key; valid targets highlight while dragging. A remove button sits on every line.
+- [x] Edits keep the schema consistent: renaming a table or primary-key column updates foreign keys that point at it, removing a table detaches its children, and connections that would form a cycle, self-references and non-key targets are refused with a message.
+- [x] The diagram and the schema form edit the same state, and the selected table is shared; switching views loses nothing.
+- [ ] Card positions are not saved in experiments, exports or share links; they reset to the auto layout when an experiment is loaded.
+- [ ] No column editing directly on the cards (use the form beside the diagram) and no zoom/pan beyond scrolling.
+- [ ] Connecting by dragging is pointer-only. The keyboard path is the "references" menu in the schema form. Touch uses pointer events but is untested on real touch hardware.
+- [ ] Only many-to-one links to a sequence-filled integer primary key (no many-to-many, composite or ON DELETE settings). Changing a referenced primary key's generator shows a validation message rather than rewriting the links.
+
 ### Results display
 - [x] User-chosen row limit (1-5,000, default 200, persisted in localStorage) with an engine-enforced ceiling of 5,000, an 8 MB returned-data budget, and a virtualized results table (only visible rows are in the DOM). Benchmarks and DDL request no rows.
 - [ ] Columns have a fixed minimum width and single-line cells; no column resizing or wrapped cell view yet.

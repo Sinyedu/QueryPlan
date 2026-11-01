@@ -1,17 +1,15 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useLab } from './hooks/useLab';
 import { decodeShare } from './domain/experiment';
-import { ExperimentsPanel } from './components/ExperimentsPanel';
-import { PlanPanel } from './components/PlanPanel';
-import { ResultsTable } from './components/ResultsTable';
-import { SchemaBuilder } from './components/SchemaBuilder';
-import { SeedPanel } from './components/SeedPanel';
-import { Sidebar } from './components/Sidebar';
-import { SqlEditor } from './components/SqlEditor';
+import { DesignerView } from './components/DesignerView';
+import { LabView } from './components/LabView';
 import { Alert, Button } from './components/ui';
+
+type View = 'lab' | 'designer';
 
 export function App() {
   const lab = useLab();
+  const [view, setView] = useState<View>('lab');
   const { info } = lab;
   const { loadExperiment, setNotice } = lab;
 
@@ -33,8 +31,14 @@ export function App() {
         <span className="rounded bg-zinc-800 px-2 py-0.5 font-mono text-xs text-zinc-300" data-testid="engine-info">
           {info ? `SQLite ${info.version} · WASM · in-memory (cleared on refresh)` : 'Starting SQLite…'}
         </span>
+        <nav role="tablist" aria-label="View" className="flex overflow-hidden rounded border border-zinc-700 text-sm">
+          {([['lab', 'Lab'], ['designer', 'Designer']] as const).map(([id, label]) => (
+            <button key={id} role="tab" aria-selected={view === id} onClick={() => setView(id)}
+              className={`px-3 py-1 font-medium ${view === id ? 'bg-sky-700 text-white' : 'bg-zinc-900 text-zinc-300 hover:bg-zinc-800'}`}>{label}</button>
+          ))}
+        </nav>
         <div className="ml-auto flex gap-2">
-          <Button disabled={lab.busy !== null} onClick={() => void lab.runGuided()}>▶ Guided example</Button>
+          <Button disabled={lab.busy !== null} onClick={() => { setView('lab'); void lab.runGuided(); }}>▶ Guided example</Button>
           <Button variant="danger" disabled={lab.busy === 'init'}
             onClick={() => { if (window.confirm('Reset the database? All tables and rows will be deleted.')) void lab.resetDatabase(); }}>
             Reset database
@@ -49,19 +53,7 @@ export function App() {
         </div>
       )}
 
-      <main className="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(300px,400px)_minmax(0,1fr)] xl:grid-cols-[minmax(300px,400px)_minmax(0,1fr)_minmax(320px,440px)]">
-        <aside className="space-y-4">
-          <SchemaBuilder lab={lab} />
-          <SeedPanel lab={lab} />
-          <Sidebar lab={lab} />
-          <ExperimentsPanel lab={lab} />
-        </aside>
-        <div className="min-w-0 space-y-4">
-          <SqlEditor lab={lab} />
-          <ResultsTable query={lab.query} />
-        </div>
-        <div className="min-w-0 lg:col-span-2 xl:col-span-1"><PlanPanel lab={lab} /></div>
-      </main>
+      {view === 'lab' ? <LabView lab={lab} /> : <DesignerView lab={lab} onOpenLab={() => setView('lab')} />}
 
       <footer className="text-xs text-zinc-600">
         Everything runs in your browser; SQL, schemas and data never leave this page. PostgreSQL support is planned as a separate isolated backend.

@@ -19,7 +19,7 @@ The badge at the top shows the engine, e.g. `SQLite 3.54.1 · WASM · in-memory 
 
 | Area | What it is |
 | --- | --- |
-| **Header** | Engine badge · **▶ Guided example** · **Reset database** (asks for confirmation) |
+| **Header** | Engine badge · **Lab \| Designer** view switch · **▶ Guided example** · **Reset database** (asks for confirmation) |
 | **Left column** | 1 · Table schema · 2 · Seed data · Database (what really exists) · Experiments |
 | **Middle** | SQL editor · Results |
 | **Right** | Query plan · 3 · Index experiment |
@@ -45,6 +45,16 @@ SQLite decides the plan, so the exact wording can vary by version. The app never
 - **distribution:** `uniform` spreads values evenly; `skewed` makes a few values very common (try it on a foreign key or `word` column, since it changes how useful an index is).
 - Names must be letters, digits and underscores, not starting with a digit. Problems are listed in amber under the form, and **Create tables** stays disabled until the schema is valid.
 - **Create tables** builds them in the right order (parents first). If tables already exist it becomes **Drop & recreate tables**.
+
+### Design tables visually (Designer view)
+Click **Designer** in the header. The diagram and the schema form edit the same tables, so switching views loses nothing.
+- **Drag a table** by its header; **Auto-arrange** resets the layout; **+ Table** adds one.
+- **Connect tables:** drag from the ● at the end of a column row onto another table's **PK** row. While dragging, valid targets glow green. The column becomes a foreign key (shown as an **FK** badge and a line with 1 and N ends).
+- **Remove a link** with the ✕ on the line or the **remove** button in the Relationships list.
+- Refused with a reason: linking a table to itself, using a primary key as the reference, targets that are not a sequence-filled integer primary key, and links that would make a cycle.
+- Renaming a table or primary-key column updates the foreign keys that point at it; removing a table turns its children's keys back into plain integers.
+- No mouse? Use the **references** menu on a foreignKey column in the schema form.
+- Press **Create tables** (right side), then **Open the Lab →** to seed and query.
 
 ### Seed data (panel 2)
 - Set a **row count per table** (100 to 10,000 each, 30,000 in total) and a **Seed** number. The same seed always produces the same data.
@@ -146,6 +156,11 @@ Tick these off in a fresh page (refresh first). **Expected** is what you should 
 | # | Do | Expected |
 | --- | --- | --- |
 | D4 | Set "Show up to" to 5,000 and run `WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x < 6000) SELECT x FROM c` | `6,000 rows (showing first 5,000)`; scrolling is smooth; the last row you can reach is 5000 |
+| D5 | Open **Designer**, press **+ Table**, drag the ● on `table2.label` onto `users`' **id** row | A line appears; Relationships lists `table2.label → users.id`; the SQL preview gains `REFERENCES "users" ("id")` |
+| D6 | Rename `users` to `customers` in the form | The relationship and SQL preview now say `customers` |
+| D7 | Try to connect a table back to its own child | A message says it would create a cycle; nothing changes |
+| D8 | Drag a table header; press **Auto-arrange** | Card moves; Auto-arrange restores the neat layout |
+| D9 | Switch to **Lab** and back to **Designer** | Diagram and links are unchanged |
 | D1 | Narrow the window to phone width (about 390 px) | Panels stack; no horizontal page scroll |
 | D2 | Open the site in Firefox and Safari | **Not yet tested.** Note anything broken |
 | D3 | Open DevTools → Console during A1–A13 | No red errors |
