@@ -6,7 +6,7 @@ React UI -> typed Worker client -> dedicated SQLite Worker -> SQLite WASM in-mem
 ## Suggested layout
 ```
 apps/web/src/
-  components/{SchemaBuilder,SeedPanel,SqlEditor,ResultsTable,PlanViewer}.tsx
+  components/{QueryWorkspace,SchemaView,SchemaBuilder,SeedPanel,Sidebar,SqlEditor,ResultsTable,PlanPanel,PlanViewer,ExperimentsMenu}.tsx
   db/{engine.ts,sqlite-client.ts,sqlite-worker.ts,protocol.ts}
   domain/{schema.ts,seeding.ts,explain.ts}
   hooks/
@@ -48,4 +48,5 @@ MVP: in-memory, refresh clears data. Later: opt-in OPFS where supported, with te
 
 ## Designer
 - `domain/designer.ts` holds the pure schema operations (connect, disconnect, rename/remove with reference cascades, auto-layout); `hooks/useSchemaDesign.ts` adds selection, card positions and messages; `components/designer/` renders the canvas with plain pointer events (no graph library).
-- The Lab and Designer views are separate components over the same `useLab` state, so the diagram and form never diverge.
+- The Workspace and Schema views are separate components over the same `useLab` state, so the diagram and form never diverge.
+- Styling uses semantic Tailwind tokens (`bg-surface`, `text-ink`, `border-line`, `accent`) defined once in `index.css`; components do not use raw palette colours.

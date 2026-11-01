@@ -34,21 +34,21 @@ export function RelationshipLines({ tables, positions, relations, pending, onRem
       <svg width={width} height={height} className="pointer-events-none absolute left-0 top-0" aria-hidden>
         {drawn.map(({ r, p, c, pSide, cSide }) => (
           <g key={label(r)}>
-            <path d={curve(p, c, pSide, cSide)} fill="none" stroke="#38bdf8" strokeWidth={1.5} />
-            <circle cx={p.x} cy={p.y} r={3.5} fill="#38bdf8" />
-            <text x={p.x + (pSide === 'right' ? 8 : -8)} y={p.y - 6} fontSize={10} fill="#7dd3fc" textAnchor={pSide === 'right' ? 'start' : 'end'}>1</text>
-            <circle cx={c.x} cy={c.y} r={3.5} fill="#38bdf8" />
-            <text x={c.x + (cSide === 'right' ? 8 : -8)} y={c.y - 6} fontSize={10} fill="#7dd3fc" textAnchor={cSide === 'right' ? 'start' : 'end'}>N</text>
+            <path d={curve(p, c, pSide, cSide)} fill="none" stroke="#13786c" strokeWidth={1.75} />
+            <circle cx={p.x} cy={p.y} r={3.5} fill="#13786c" />
+            <text x={p.x + (pSide === 'right' ? 8 : -8)} y={p.y - 6} fontSize={11} fontWeight={600} fill="#0b4f47" textAnchor={pSide === 'right' ? 'start' : 'end'}>1</text>
+            <circle cx={c.x} cy={c.y} r={3.5} fill="#13786c" />
+            <text x={c.x + (cSide === 'right' ? 8 : -8)} y={c.y - 6} fontSize={11} fontWeight={600} fill="#0b4f47" textAnchor={cSide === 'right' ? 'start' : 'end'}>N</text>
           </g>
         ))}
-        {pending && <path d={`M${pending.from.x} ${pending.from.y} L${pending.to.x} ${pending.to.y}`} stroke="#34d399" strokeWidth={2} strokeDasharray="5 4" fill="none" />}
+        {pending && <path d={`M${pending.from.x} ${pending.from.y} L${pending.to.x} ${pending.to.y}`} stroke="#13786c" strokeWidth={2} strokeDasharray="5 4" fill="none" />}
       </svg>
       {drawn.map(({ r, p, c }) => {
         const m = midpoint(p, c);
         return (
           <button key={label(r)} aria-label={`Remove relationship ${label(r)}`} title={`Remove ${label(r)}`} onClick={() => onRemove(r)}
             style={{ left: m.x - 9, top: m.y - 9 }}
-            className="absolute h-[18px] w-[18px] rounded-full border border-sky-700 bg-zinc-900 text-[10px] leading-none text-sky-300 hover:border-red-500 hover:text-red-400">✕</button>
+            className="absolute h-[18px] w-[18px] rounded-full border border-accent bg-surface text-[10px] leading-none text-accent hover:border-danger hover:text-danger">✕</button>
         );
       })}
     </>

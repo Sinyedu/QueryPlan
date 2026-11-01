@@ -56,7 +56,7 @@ export function useLab() {
 
   useEffect(() => {
     engine.onRestart = (reason) => {
-      setNotice(reason); setSchema({ tables: [] }); setBefore(null); setCurrent(null); setProgress(null); setBusy(null);
+      setNotice(reason); setApplied(null); setSchema({ tables: [] }); setBefore(null); setCurrent(null); setProgress(null); setBusy(null);
     };
     engine.initialize().then(setInfo).then(refreshSchema).catch((e) => setNotice(errMsg(e))).finally(() => setBusy(null));
     return () => engine.dispose();
@@ -71,6 +71,10 @@ export function useLab() {
   const defs = useMemo(() => tables.map((t) => t.table), [tables]);
   const schemaIssues = useMemo(() => validateSchema(defs), [defs]);
   const existing = schema.tables.some((t) => defs.some((d) => d.name === t.name));
+  /** The schema draft as last applied to the database; `dirty` flags edits that have not been applied yet. */
+  const [applied, setApplied] = useState<string | null>(null);
+  const signature = useMemo(() => JSON.stringify(defs), [defs]);
+  const dirty = applied !== null && applied !== signature;
 
   const doSeed = useCallback(async (list: SeedTable[], seed: number) => {
     setSeedMsg(null); setProgress({ done: 0, total: list.reduce((n, t) => n + t.rowCount, 0) });
@@ -84,8 +88,9 @@ export function useLab() {
   const createSchema = useCallback(() => run('table', async () => {
     setTableError(null); setBefore(null); setCurrent(null);
     await engine.createSchema(defs, existing);
+    setApplied(signature);
     await refreshSchema();
-  }, setTableError), [run, engine, defs, existing, refreshSchema]);
+  }, setTableError), [run, engine, defs, existing, signature, refreshSchema]);
 
   const seed = useCallback(() => run('seed', () => doSeed(tables, seedValue).catch(() => undefined)), [run, doSeed, tables, seedValue]);
 
@@ -143,6 +148,7 @@ export function useLab() {
   const runExperiment = useCallback((e: Experiment) => run('table', async () => {
     setNotice(null); loadExperiment(e);
     await engine.createSchema(e.tables.map((t) => t.table), true);
+    setApplied(JSON.stringify(e.tables.map((t) => t.table)));
     setBusy('seed');
     await doSeed(e.tables, e.seed);
     await runQuery(e.sql);
@@ -151,13 +157,13 @@ export function useLab() {
   const resetDatabase = useCallback(() => run('init', async () => {
     setInfo(await engine.reset());
     setSchema({ tables: [] }); setQuery({ status: 'idle' }); setCurrent(null); setBefore(null);
-    setProgress(null); setSeedMsg(null); setNotice('Database reset. It is empty again.');
+    setProgress(null); setSeedMsg(null); setApplied(null); setNotice('Database reset. It is empty again.');
   }), [engine, run]);
 
   const toExperiment = useCallback((name: string): Experiment => ({ version: EXPERIMENT_VERSION, name, tables, seed: seedValue, sql }), [tables, seedValue, sql]);
 
   return {
-    info, schema, busy, notice, setNotice, tables, setTables, design, tableError, schemaIssues, existing,
+    info, schema, busy, notice, setNotice, tables, setTables, design, tableError, schemaIssues, existing, dirty,
     seedValue, setSeedValue, progress, seedMsg, sql, setSql, query, current, before,
     benchRuns, setBenchRuns, rowLimit, setRowLimit, benchmarkable: isBenchmarkable(sql),
     createSchema, seed, runQuery, compareWithIndex, dropIndex, loadExperiment, runExperiment, toExperiment,

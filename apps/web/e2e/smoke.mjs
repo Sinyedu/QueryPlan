@@ -36,18 +36,28 @@ try {
 
   const check = (cond, msg) => { if (!cond) throw new Error(`FAIL: ${msg}`); console.log(`ok - ${msg}`); };
 
+  const view = (name) => page.getByRole('tab', { name, exact: true }).click();
+  const out = (name) => page.getByRole('tab', { name, exact: true }).click();
+  const menu = async () => { await page.getByRole('button', { name: 'Experiments' }).click(); };
   await page.getByTestId('engine-info').filter({ hasText: /SQLite \d/ }).waitFor({ timeout: 20_000 });
   check(true, 'worker booted and reports SQLite version');
 
+  await view('Schema');
   await page.getByRole('button', { name: 'Create tables' }).click();
+  await page.getByText('Edit table').waitFor();
+  await view('Workspace');
+  await page.getByRole('button', { name: 'Seed data', exact: true }).click();
   await page.getByRole('button', { name: 'Seed all tables' }).waitFor();
   await page.getByLabel('Row count for users').fill('1000');
   await page.getByRole('button', { name: 'Seed all tables' }).click();
   await page.getByText(/Inserted 1,000 rows/).waitFor({ timeout: 20_000 });
   check(true, 'created and seeded 1,000 rows');
+  await page.getByRole('button', { name: 'Back to query' }).click();
 
   await page.getByLabel('SQL editor').fill("SELECT * FROM users WHERE email = 'nobody@example.com'");
   await page.getByRole('button', { name: 'Run & explain' }).click();
+  await page.getByText(/elapsed/).first().waitFor();
+  await out('Query plan');
   await page.getByRole('tree').getByText(/^SCAN users/).waitFor({ timeout: 10_000 });
   check(true, 'plan shows SCAN before index');
 
@@ -57,37 +67,47 @@ try {
   check(true, 'SVG plan graph renders and shows a per-step note');
   await page.getByRole('button', { name: 'list', exact: true }).click();
 
+  await out('Compare index');
   await page.getByRole('button', { name: /Create index/ }).click();
   await page.getByRole('tree', { name: /After index/ }).getByText(/SEARCH users USING INDEX idx_users_email/).waitFor({ timeout: 20_000 });
   check(true, 'plan shows SEARCH ... USING INDEX after index');
 
   await page.getByLabel('SQL editor').fill('SELEC nope');
   await page.getByRole('button', { name: 'Run & explain' }).click();
+  await out('Results');
   await page.getByRole('alert').filter({ hasText: /syntax error/i }).waitFor();
   check(true, 'SQL errors are displayed');
 
   await page.getByRole('button', { name: /Guided example/ }).click();
+  await out('Query plan');
   await page.getByRole('tree').getByText(/^SCAN users/).waitFor({ timeout: 20_000 });
   check(true, 'guided example ends on a scan plan');
 
   // --- Phase 1: multiple tables, foreign keys, experiments ---
-  const exampleRow = (label) => page.locator('li', { hasText: label }).filter({ has: page.getByRole('button', { name: 'run' }) });
-  await exampleRow('Join: orders by user').getByRole('button', { name: 'run' }).click();
+  const runJoinExample = async () => {
+    await menu();
+    await page.locator('li', { hasText: 'Join: orders by user' }).getByRole('button', { name: 'run' }).click();
+  };
+  await runJoinExample();
+  await out('Query plan');
   await page.getByRole('list', { name: 'Reading this plan' }).waitFor({ timeout: 30_000 });
-  await page.getByText(/Inserted 12,000 rows/).waitFor();
-  await page.getByText(/→ users\.id/).waitFor();
+  await page.getByText('10,000 rows').waitFor();
+  await page.getByText(/→ users\.id/).waitFor({ state: 'attached' });
   check(true, 'join example: two tables seeded (12,000 rows), FK shown, plan insights visible');
 
   await page.getByLabel('SQL editor').waitFor();
+  await out('Compare index');
   await page.locator('#idx-table').selectOption('orders');
   await page.locator('#idx-col').selectOption('user_id');
   await page.getByRole('button', { name: /Create index/ }).click();
   await page.getByRole('tree', { name: 'After index on orders' }).getByText(/idx_orders_user_id/).first().waitFor({ timeout: 30_000 });
   check(true, 'index on orders(user_id) changes the join plan');
 
+  await menu();
   await page.getByLabel('Experiment name').fill('e2e saved');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.reload();
+  await menu();
   await page.getByText('e2e saved').waitFor();
   check(true, 'saved experiment survives a reload (localStorage)');
 
@@ -97,22 +117,25 @@ try {
   const shared = await context.newPage();
   await shared.goto(link);
   await shared.getByText(/Loaded shared experiment/).waitFor({ timeout: 20_000 });
-  check((await shared.getByText(/Inserted/).count()) === 0, 'share link loads a definition without running anything');
+  check((await shared.getByText(/Inserted|elapsed/).count()) === 0, 'share link loads a definition without running anything');
   await shared.close();
   await page.getByLabel('Import experiment file').setInputFiles({ name: 'bad.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ version: 1, name: 'x', seed: 1, sql: '', tables: [{ rowCount: 100, table: { name: 'a"; DROP TABLE x; --', columns: [] } }] })) });
   await page.getByText(/Import rejected/).waitFor();
   check(true, 'malicious import is rejected');
+  await page.keyboard.press('Escape');
 
   // --- Safety: hostile and careless input through the real UI ---
   const runSql = async (sql) => {
     await page.getByLabel('SQL editor').fill(sql);
     await page.getByRole('button', { name: 'Run & explain' }).click();
+    await out('Results');
   };
   const XSS = '<img src=x onerror=window.__pwn=1>';
 
   // The reload above cleared the in-memory database (by design), so rebuild the join example first.
-  await exampleRow('Join: orders by user').getByRole('button', { name: 'run' }).click();
-  await page.getByText(/Inserted 12,000 rows/).waitFor({ timeout: 30_000 });
+  await runJoinExample();
+  await page.getByText('10,000 rows').waitFor({ timeout: 30_000 });
+  await out('Query plan');
   await page.getByRole('list', { name: 'Reading this plan' }).waitFor({ timeout: 30_000 });
 
   await runSql(`SELECT '${XSS}' AS x`);
@@ -133,8 +156,9 @@ try {
   check(true, 'ATTACH and budget-lifting PRAGMAs are blocked');
 
   await runSql('CREATE TABLE "my table" (a INTEGER)');
-  await page.locator('p', { hasText: 'my table' }).first().waitFor();
+  await page.locator('summary', { hasText: 'my table' }).first().waitFor();
   check((await page.getByRole('alert').filter({ hasText: /already exists|my table/ }).count()) === 0, 'a table with an unusual name does not break the schema view or the plan panel');
+  await out('Compare index');
   await page.locator('#idx-table').selectOption('my table');
   check(await page.getByRole('button', { name: /Create index/ }).isDisabled(), 'index experiment is disabled for names the form cannot quote safely');
 
@@ -147,6 +171,7 @@ try {
   await page.getByRole('cell', { name: '10000', exact: true }).waitFor();
   check(true, 'a write hidden behind WITH is refused by the benchmark and deletes nothing');
 
+  await menu();
   await page.getByLabel('Import experiment file').setInputFiles({
     name: 'html.json', mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify({ version: 1, name: XSS, seed: 1, sql: 'SELECT 1', tables: [{ rowCount: 100, table: { name: 't', columns: [{ name: 'id', type: 'INTEGER', generator: 'sequence', primaryKey: true }] } }] })),
@@ -154,6 +179,7 @@ try {
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByText(XSS, { exact: true }).first().waitFor();
   check((await page.evaluate(() => window.__pwn)) === undefined && (await page.locator('#root img').count()) === 0, 'an experiment named with HTML is rendered as text');
+  await page.keyboard.press('Escape');
 
   // --- Visual designer: connect tables by dragging ---
   const drag = async (from, to, finish = true) => {
@@ -167,8 +193,8 @@ try {
   const rels = page.getByRole('list', { name: 'Relationships' });
   const preview = page.getByLabel('Generated SQL');
 
-  check((await page.getByRole('region', { name: 'Schema diagram' }).count()) === 0, 'the designer is not part of the lab view');
-  await page.getByRole('tab', { name: 'Designer', exact: true }).click();
+  check((await page.getByRole('region', { name: 'Schema diagram' }).count()) === 0, 'the diagram is not part of the workspace view');
+  await view('Schema');
   await page.getByRole('region', { name: 'Schema diagram' }).waitFor();
   await page.getByRole('button', { name: '+ Table', exact: true }).click();
   const solo = await page.getByRole('group', { name: /^Table / }).count();
@@ -176,10 +202,10 @@ try {
   await rels.getByText(/table2\.label/).waitFor();
   check((await preview.textContent()).includes('REFERENCES "t" ("id")'), `dragging a column onto a primary key creates a foreign key (${solo} tables on canvas)`);
 
-  await page.getByRole('tab', { name: 'Lab', exact: true }).click();
-  await page.getByRole('tab', { name: 'Designer', exact: true }).click();
+  await view('Workspace');
+  await view('Schema');
   await rels.getByText(/table2\.label/).waitFor();
-  check(true, 'switching between Lab and Designer keeps the diagram state');
+  check(true, 'switching between Workspace and Schema keeps the diagram state');
 
   await page.getByRole('tab', { name: 't', exact: true }).click();
   await page.getByLabel('Table name').fill('parent');
@@ -203,9 +229,11 @@ try {
   await page.getByRole('button', { name: /Remove relationship table2\.label/ }).click();
   await page.getByText(/None yet/).waitFor();
   check(!(await preview.textContent()).includes('REFERENCES'), 'removing a relationship from the diagram removes the foreign key');
-  await page.getByRole('button', { name: /Open the Lab/ }).click();
+  await page.getByRole('button', { name: /Next: seed data/ }).click();
+  await page.getByRole('heading', { name: 'Seed data' }).waitFor();
+  await page.getByRole('button', { name: 'Back to query' }).click();
   await page.getByLabel('SQL editor').waitFor();
-  check((await page.getByRole('region', { name: 'Schema diagram' }).count()) === 0, '"Open the Lab" returns to the workbench');
+  check((await page.getByRole('region', { name: 'Schema diagram' }).count()) === 0, '"Next: seed data" then "Back to query" returns to the workspace');
 
   // --- User-chosen row limit and virtualized results ---
   const series = (n) => `WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x < ${n}) SELECT x FROM c`;
@@ -235,13 +263,13 @@ try {
   await page.getByLabel('SQL editor').fill('WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT count(*) FROM c');
   await page.getByRole('button', { name: 'Run & explain' }).click();
   page.once('dialog', (d) => d.accept());
-  await page.getByRole('button', { name: /Stop \(clears DB\)/ }).click();
+  await page.getByRole('button', { name: /Stop \(clears database\)/ }).click();
   await page.getByText(/Canceled: worker terminated/).first().waitFor({ timeout: 10_000 });
   check(true, 'Stop terminates a runaway query and reports it');
 
   const mobile = await browser.newPage({ viewport: { width: 390, height: 800 } });
   await mobile.goto(URL_);
-  await mobile.getByTestId('engine-info').filter({ hasText: /SQLite \d/ }).waitFor({ timeout: 20_000 });
+  await mobile.getByTestId('engine-info').filter({ hasText: /SQLite \d/ }).waitFor({ state: 'attached', timeout: 20_000 });
   const overflow = await mobile.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   check(overflow <= 0, `no horizontal overflow at 390px width (overflow=${overflow})`);
   await mobile.close();

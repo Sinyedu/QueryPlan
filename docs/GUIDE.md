@@ -19,55 +19,56 @@ The badge at the top shows the engine, e.g. `SQLite 3.54.1 · WASM · in-memory 
 
 | Area | What it is |
 | --- | --- |
-| **Header** | Engine badge · **Lab \| Designer** view switch · **▶ Guided example** · **Reset database** (asks for confirmation) |
-| **Left column** | 1 · Table schema · 2 · Seed data · Database (what really exists) · Experiments |
-| **Middle** | SQL editor · Results |
-| **Right** | Query plan · 3 · Index experiment |
+| **Top bar** | Engine badge · **Workspace \| Schema** views · **Experiments** menu · **Guided example** |
+| **Database sidebar** (Workspace) | What really exists in the database (tables, columns, row counts, indexes) · **+ Table** · **Seed data** · **Edit schema** · **Reset database** (asks first) |
+| **Workspace** | **SQL** editor on top; below it one output panel with tabs **Results**, **Query plan** and **Compare index**. Switching tabs never reruns SQL. |
+| **Schema** | A diagram of your tables beside an **Edit table** form (generator, distribution, references, SQL preview, **Create tables**) |
+| **Seed data page** | Reached from the sidebar or **Next: seed data →**; **Back to query** returns |
 
-On a phone the columns stack vertically.
+On a phone the sidebar becomes a **Database** drawer and panels stack.
 
 ## 3. Quick tour (2 minutes): the Guided example
 
 1. Press **▶ Guided example**. It creates `users`, seeds 5,000 rows and runs an email lookup.
-2. In **Query plan** you should see **`SCAN users`** (amber badge): SQLite reads every row.
-3. In **3 · Index experiment** leave `users` / `email` selected and press **Create index & compare**.
-4. The plan panel now shows **Before index** and **After index on users(email)**. The second one should say **`SEARCH users USING INDEX idx_users_email (email=?)`** (green badge), and the measured time should drop.
+2. Open the **Query plan** tab. You should see **`SCAN users`** (amber badge): SQLite reads every row.
+3. Open the **Compare index** tab, leave `users` / `email` selected and press **Create index & compare**.
+4. The tab now shows **Before index** and **After index on users(email)**. The second one should say **`SEARCH users USING INDEX idx_users_email (email=?)`** (green badge), and the measured time should drop.
 5. Click a plan step for a plain-language note. Try the **Graph** toggle for the same plan as a diagram.
 
 SQLite decides the plan, so the exact wording can vary by version. The app never guarantees that an index will be used.
 
 ## 4. Using each feature
 
-### Build a schema (panel 1)
-- **Tabs** are tables (up to 6). **+ table** adds one, **✕** next to the name removes it.
-- Each column has a **name**, **type**, **generator** (what fake data fills it) and a **PK** checkbox (only one, and only INTEGER).
-- **foreignKey generator:** pick a parent in the *references* dropdown. A foreign key can only point at another table's integer primary key that uses the `sequence` generator.
+### Build a schema (Schema view, Edit table)
+- The small tabs are tables (up to 6). **+ table** adds one; **Remove** deletes the selected one.
+- Each column row has a **name**, **type** and **Key** (None or Primary key; only one, and only INTEGER). Click a row to open **Column: …** below it, where you choose the **generator** (what fake data fills it), **distribution** and, for foreign keys, **References**.
+- **foreignKey generator:** pick a parent in the *References* dropdown. A foreign key can only point at another table's integer primary key that uses the `sequence` generator.
 - **distribution:** `uniform` spreads values evenly; `skewed` makes a few values very common (try it on a foreign key or `word` column, since it changes how useful an index is).
-- Names must be letters, digits and underscores, not starting with a digit. Problems are listed in amber under the form, and **Create tables** stays disabled until the schema is valid.
-- **Create tables** builds them in the right order (parents first). If tables already exist it becomes **Drop & recreate tables**.
+- Names must be letters, digits and underscores, not starting with a digit. Problems are listed under the form, and **Create tables** stays disabled until the schema is valid.
+- **Preview SQL** shows the CREATE TABLE statements. **Create tables** builds them in the right order (parents first). If tables already exist it becomes **Drop & recreate tables** and asks before deleting. Edits you have not applied yet are labelled **Not applied yet**.
 
-### Design tables visually (Designer view)
-Click **Designer** in the header. The diagram and the schema form edit the same tables, so switching views loses nothing.
+### Design tables visually (diagram)
+Open the **Schema** view. The diagram and the Edit table form edit the same tables, so switching views loses nothing. **Table editor** hides the diagram and shows the form alone.
 - **Drag a table** by its header; **Auto-arrange** resets the layout; **+ Table** adds one.
 - **Connect tables:** drag from the ● at the end of a column row onto another table's **PK** row. While dragging, valid targets glow green. The column becomes a foreign key (shown as an **FK** badge and a line with 1 and N ends).
 - **Remove a link** with the ✕ on the line or the **remove** button in the Relationships list.
 - Refused with a reason: linking a table to itself, using a primary key as the reference, targets that are not a sequence-filled integer primary key, and links that would make a cycle.
 - Renaming a table or primary-key column updates the foreign keys that point at it; removing a table turns its children's keys back into plain integers.
 - No mouse? Use the **references** menu on a foreignKey column in the schema form.
-- Press **Create tables** (right side), then **Open the Lab →** to seed and query.
+- Press **Create tables**, then **Next: seed data →**.
 
-### Seed data (panel 2)
+### Seed data (page)
 - Set a **row count per table** (100 to 10,000 each, 30,000 in total) and a **Seed** number. The same seed always produces the same data.
 - **Seed all tables** fills parents before children and shows a progress bar and a message like `Inserted 12,000 rows in 89 ms (measured), seed 42.`
-- Seeding **replaces** existing rows in those tables. **Stop (clears DB)** appears while seeding; it terminates the worker and empties the database (it asks first).
+- Seeding **replaces** existing rows in those tables. **Stop & clear database** appears while seeding; it terminates the worker and empties the database (it asks first).
 
 ### Run SQL
 - Type SQL in the editor; **Ctrl/⌘ + Enter** or **Run & explain**. Several statements at once are allowed.
-- **Show up to N rows** (next to Run) is yours to choose: 1 to 5,000, default 200, remembered in this browser. **Results** show that many rows; the header says the real row count, e.g. `10,000 rows (showing first 200)`, plus the measured time.
+- **Show up to N rows** (right of Run) is yours to choose: 1 to 5,000, default 200, remembered in this browser. **Results** show that many rows; the header says the real row count, e.g. `10,000 rows (showing first 200)`, plus the measured time.
 - Big results stay fast because the table is *virtualized*: only the rows on screen exist in the page, so scrolling through 5,000 rows is smooth. Very wide or long values can hit an 8 MB data limit first; the message then says so.
-- Errors appear in red. Typos such as `CRE` or `SELEC` give a SQLite error and the app keeps working.
+- Errors appear in red next to the results. Typos such as `CRE` or `SELEC` give a SQLite error and the app keeps working.
 - Plans are shown for SELECT / INSERT / UPDATE / DELETE. For `CREATE TABLE` and similar you get a note instead.
-- Queries over 10 seconds are interrupted and your data survives. If the worker stops responding, **Stop (clears DB)** (or the automatic watchdog) restarts it, which **empties the database**.
+- Queries over 10 seconds are interrupted and your data survives. If the worker stops responding, **Stop (clears database)** (or the automatic watchdog) restarts it, which **empties the database**.
 
 ### Read the plan
 - Steps are shown as an indented list (**List**) or a diagram (**Graph**).
@@ -75,15 +76,15 @@ Click **Designer** in the header. The diagram and the schema form edit the same 
 - The blue **"Reading this plan"** box explains joins (nested loops), full scans inside a loop and automatic indexes, using only what SQLite printed.
 - SQLite gives **no costs and no per-step timings**. The time shown is separately measured wall-clock time.
 
-### Index experiment (panel 3)
+### Compare index (output tab)
 - Pick a **table**, a **column** and optionally a second column, choose **samples** (3/5/10/20), then **Create index & compare**.
 - It benchmarks your editor query, creates the index, benchmarks again and shows both plans. Needs a **single SELECT or WITH query** that only reads.
-- **drop** removes an index so you can repeat the experiment.
-- Open **Benchmark methodology** for exactly how the timing is measured.
+- **Drop index** removes an index so you can repeat the experiment.
+- Open **Benchmark details** for exactly how the timing is measured.
 
 ### Experiments (save, export, share)
 An experiment is the schema, row counts, seed and SQL. It holds **no row data**; data is regenerated from the seed.
-- **Save** stores it in this browser. **load** fills the editors only; **run** creates, seeds and runs it.
+- Open the **Experiments** menu in the top bar. **Save** stores it in this browser. **load** fills the editors only; **run** creates, seeds and runs it.
 - **Export** downloads a JSON file; **Import…** reads one.
 - **Copy share link** copies a URL ending in `#exp=…`. Opening it fills the editors and shows a notice; **nothing runs automatically.**
 - Built-in **Examples** include a join example (users + orders).
@@ -94,7 +95,7 @@ An experiment is the schema, row counts, seed and SQL. It holds **no row data**;
 ```bash
 pnpm lint
 pnpm typecheck
-pnpm test                 # 154 unit + real-SQLite integration tests
+pnpm test                 # 178 unit + real-SQLite integration tests
 pnpm build
 pnpm --filter web e2e     # real browser test (needs Chrome or Edge installed)
 ```
@@ -108,8 +109,8 @@ Tick these off in a fresh page (refresh first). **Expected** is what you should 
 ### A. Intended use
 | # | Do | Expected |
 | --- | --- | --- |
-| A1 | Open the site | Badge shows a SQLite version; Database panel says `Empty. No tables yet.` |
-| A2 | **Create tables**, then **Seed all tables** with 1,000 rows | Progress bar, then `Inserted 1,000 rows …`; Database panel lists `users · 1,000 rows` |
+| A1 | Open the site | Badge shows a SQLite version; the Database sidebar says `Empty. No tables yet.` |
+| A2 | **Schema → Create tables**, then **Seed data → Seed all tables** with 1,000 rows | Progress bar, then `Inserted 1,000 rows …`; the sidebar lists `users · 1,000 rows` |
 | A3 | Run `SELECT * FROM users WHERE email = 'nobody@example.com'` | 0 rows, a time in ms, plan `SCAN users` |
 | A4 | **Create index & compare** (users/email) | Before shows `SCAN`, After shows `SEARCH … USING INDEX idx_users_email` |
 | A5 | Same seed twice: seed, note a row with `SELECT * FROM users WHERE id = 5`, seed again | Identical row. Change the seed number and seed again: different data |
@@ -120,7 +121,7 @@ Tick these off in a fresh page (refresh first). **Expected** is what you should 
 | A10 | Name an experiment, **Save**, refresh the page | It appears under "Saved in this browser" (data itself is gone) |
 | A11 | **Export**, then **Import…** the file | Editors fill and a success message appears |
 | A12 | **Copy share link**, open it in a new tab | Notice `Loaded shared experiment …`; no rows inserted until you act |
-| A13 | **Reset database** and confirm | Database panel empty again |
+| A13 | **Reset database** and confirm | sidebar empty again |
 
 ### B. Mistakes and misspellings
 | # | Do | Expected |
@@ -156,11 +157,11 @@ Tick these off in a fresh page (refresh first). **Expected** is what you should 
 | # | Do | Expected |
 | --- | --- | --- |
 | D4 | Set "Show up to" to 5,000 and run `WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x < 6000) SELECT x FROM c` | `6,000 rows (showing first 5,000)`; scrolling is smooth; the last row you can reach is 5000 |
-| D5 | Open **Designer**, press **+ Table**, drag the ● on `table2.label` onto `users`' **id** row | A line appears; Relationships lists `table2.label → users.id`; the SQL preview gains `REFERENCES "users" ("id")` |
+| D5 | Open **Schema**, press **+ Table**, drag the ● on `table2.label` onto `users`' **id** row | A line appears; Relationships lists `table2.label → users.id`; the SQL preview gains `REFERENCES "users" ("id")` |
 | D6 | Rename `users` to `customers` in the form | The relationship and SQL preview now say `customers` |
 | D7 | Try to connect a table back to its own child | A message says it would create a cycle; nothing changes |
 | D8 | Drag a table header; press **Auto-arrange** | Card moves; Auto-arrange restores the neat layout |
-| D9 | Switch to **Lab** and back to **Designer** | Diagram and links are unchanged |
+| D9 | Switch to **Workspace** and back to **Schema** | Diagram and links are unchanged |
 | D1 | Narrow the window to phone width (about 390 px) | Panels stack; no horizontal page scroll |
 | D2 | Open the site in Firefox and Safari | **Not yet tested.** Note anything broken |
 | D3 | Open DevTools → Console during A1–A13 | No red errors |
