@@ -36,6 +36,11 @@
   - [ ] Long share links can exceed URL length limits in some chat apps/browsers; export a file for large definitions.
   - [ ] SQL inside an imported experiment runs only when the user presses Run, but it is still arbitrary SQL against the user's own in-memory database; review it before running.
 
+### Results display
+- [x] User-chosen row limit (1-5,000, default 200, persisted in localStorage) with an engine-enforced ceiling of 5,000, an 8 MB returned-data budget, and a virtualized results table (only visible rows are in the DOM). Benchmarks and DDL request no rows.
+- [ ] Columns have a fixed minimum width and single-line cells; no column resizing or wrapped cell view yet.
+- [ ] Virtualization was verified with Chrome only; scroll feel on touch devices is untested.
+
 ### Hardening pass
 - [x] Adversarial and edge-case test suites (domain fuzzing, hostile SQL against real SQLite, worker-client fault injection, UI-level injection checks). They found and fixed: EXPLAIN executing trailing statements, `WITH … DELETE` passing the benchmark guard, user SQL lifting the memory budget, unlimited value/SQL size, ATTACH, schema refresh breaking on awkward table names, a bogus plan error after DDL, a TypeError on generator names like `__proto__`, plan parsing of cyclic/duplicate rows and stack overflow on very deep plans, and a NaN repeat count.
 - [ ] Safety behaviour is verified in Chromium only; Firefox/Safari WASM and authorizer behaviour are untested.
