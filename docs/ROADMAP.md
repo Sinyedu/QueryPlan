@@ -36,8 +36,14 @@
   - [ ] Long share links can exceed URL length limits in some chat apps/browsers; export a file for large definitions.
   - [ ] SQL inside an imported experiment runs only when the user presses Run, but it is still arbitrary SQL against the user's own in-memory database; review it before running.
 
-### Visual designer (separate Designer view)
-- [x] A **Lab | Designer** switch in the header. The Designer shows a full-size diagram: draggable table cards, column rows with PK/FK badges, curved relationship lines with 1 / N markers, an auto-arrange button, and a relationship list.
+### UI redesign
+- [x] Light, simpler UI: top bar with Workspace / Schema views and an Experiments menu; database tree sidebar; SQL editor with Results / Query plan / Compare index tabs; separate Seed data page; schema inspector with per-column settings and Preview SQL.
+- [x] Unapplied schema edits are labelled; Drop & recreate and Stop both ask before deleting data.
+- [ ] No dark theme and no syntax highlighting or line numbers in the SQL editor (plain textarea).
+- [ ] Visual checks were done in Chrome at desktop and 390 px widths only.
+
+### Visual designer (Schema view)
+- [x] The **Schema** view (header tab). The Designer shows a full-size diagram: draggable table cards, column rows with PK/FK badges, curved relationship lines with 1 / N markers, an auto-arrange button, and a relationship list.
 - [x] Drag from the dot on a column to another table's primary-key row to make a foreign key; valid targets highlight while dragging. A remove button sits on every line.
 - [x] Edits keep the schema consistent: renaming a table or primary-key column updates foreign keys that point at it, removing a table detaches its children, and connections that would form a cycle, self-references and non-key targets are refused with a message.
 - [x] The diagram and the schema form edit the same state, and the selected table is shared; switching views loses nothing.

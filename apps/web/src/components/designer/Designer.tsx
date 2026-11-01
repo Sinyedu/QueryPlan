@@ -2,7 +2,7 @@ import { useRef, useState, type PointerEvent } from 'react';
 import { CARD_W, cardHeight } from '../../domain/designer';
 import { referenceTargets } from '../../domain/schema';
 import type { Lab } from '../../hooks/useLab';
-import { Button, Panel } from '../ui';
+import { Alert, Button, Card } from '../ui';
 import { anchor, type Point } from './geometry';
 import { RelationshipLines } from './RelationshipLines';
 import { TableCard } from './TableCard';
@@ -68,19 +68,10 @@ export function Designer({ lab }: { lab: Lab }) {
   const height = Math.max(300, ...defs.map((t) => (design.positions[t.name]?.y ?? 0) + cardHeight(t) + 40));
 
   return (
-    <Panel title="Database designer" aside={
-      <div className="flex gap-2">
-        <Button className="!px-2 !py-0.5 text-xs" onClick={design.add} disabled={tables.length >= 6}>+ Table</Button>
-        <Button className="!px-2 !py-0.5 text-xs" onClick={design.resetLayout}>Auto-arrange</Button>
-      </div>
-    }>
-      <p className="mb-2 text-xs text-zinc-500">
-        Drag a table by its header. Drag from the ● on a column to another table's <b>PK</b> row to connect them (the column becomes a foreign key).
-        Keyboard users can set the same link with the "references" menu in the schema form.
-      </p>
-      {design.message && <p role="status" className="mb-2 rounded border border-amber-800 bg-amber-950/60 px-2 py-1 text-xs text-amber-200">{design.message}</p>}
-      <div ref={canvas} role="region" aria-label="Schema diagram" className="relative overflow-auto rounded border border-zinc-800 bg-zinc-950"
-        style={{ height: 'max(440px, 68vh)', backgroundImage: 'radial-gradient(#27272a 1px, transparent 1px)', backgroundSize: '16px 16px' }}>
+    <div className="min-w-0">
+      {design.message && <Alert tone="warn" className="mb-2">{design.message}</Alert>}
+      <div ref={canvas} role="region" aria-label="Schema diagram" className="relative overflow-auto rounded-lg border border-line bg-canvas"
+        style={{ height: 'max(420px, 62vh)', backgroundImage: 'radial-gradient(#d5dae2 1px, transparent 1px)', backgroundSize: '16px 16px' }}>
         <div className="relative" style={{ width, height }}>
           <RelationshipLines tables={defs} positions={design.positions} relations={design.relations}
             pending={pendingFrom && link ? { from: pendingFrom, to: link.to } : null} onRemove={(r) => design.unlink(r.from)} />
@@ -92,17 +83,20 @@ export function Designer({ lab }: { lab: Lab }) {
           ))}
         </div>
       </div>
-      <h3 className="mt-3 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Relationships</h3>
-      {design.relations.length === 0 ? <p className="mt-1 text-xs text-zinc-500">None yet. Connect a column to a parent table's primary key.</p> : (
-        <ul aria-label="Relationships" className="mt-1 space-y-1">
-          {design.relations.map((r) => (
-            <li key={`${r.from.table}.${r.from.column}`} className="flex items-center justify-between rounded bg-zinc-900 px-2 py-1 font-mono text-xs">
-              <span><span className="text-zinc-200">{r.from.table}.{r.from.column}</span> <span className="text-sky-400">→</span> <span className="text-zinc-200">{r.to.table}.{r.to.column}</span> <span className="text-zinc-500">many-to-one</span></span>
-              <button aria-label={`Disconnect ${r.from.table}.${r.from.column}`} className="text-zinc-400 hover:text-red-400" onClick={() => design.unlink(r.from)}>remove</button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Panel>
+      <p className="mt-2 text-xs text-muted">Drag a column&apos;s dot to a primary key, or use References in the editor.</p>
+      <Card className="mt-3 p-3">
+        <h3 className="text-sm font-semibold text-ink">Relationships</h3>
+        {design.relations.length === 0 ? <p className="mt-1 text-sm text-muted">None yet. Connect a column to a parent table&apos;s primary key.</p> : (
+          <ul aria-label="Relationships" className="mt-2 space-y-1.5">
+            {design.relations.map((r) => (
+              <li key={`${r.from.table}.${r.from.column}`} className="flex items-center justify-between gap-2 rounded-md border border-line bg-canvas px-2.5 py-1.5 font-mono text-sm">
+                <span className="min-w-0 break-all">{r.from.table}.{r.from.column} <span className="text-accent">→</span> {r.to.table}.{r.to.column} <span className="font-sans text-xs text-muted">many-to-one</span></span>
+                <Button size="sm" aria-label={`Disconnect ${r.from.table}.${r.from.column}`} onClick={() => design.unlink(r.from)}>Remove</Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
   );
 }

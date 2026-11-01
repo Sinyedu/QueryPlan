@@ -1,10 +1,47 @@
 @import "tailwindcss";
 
+/*
+ * Design tokens: a warm off-white canvas, white surfaces, charcoal text and one restrained teal accent.
+ * Components use these semantic names (bg-surface, text-ink, border-line ...) rather than raw palette colours.
+ */
 @theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --color-canvas: #f7f8fa;
+  --color-surface: #ffffff;
+  --color-subtle: #f1f3f6;
+  --color-ink: #1b2430;
+  --color-ink-soft: #3d4857;
+  --color-muted: #5b6676;
+  --color-line: #e2e6ec;
+  --color-line-strong: #c9d0da;
+
+  --color-accent: #13786c;
+  --color-accent-hover: #0f6358;
+  --color-accent-soft: #e4f2ef;
+  --color-accent-ink: #0b4f47;
+
+  --color-warn-soft: #fff7e6;
+  --color-warn-line: #f0d9a3;
+  --color-warn-ink: #7a4d00;
+  --color-danger: #b42318;
+  --color-danger-soft: #fdecea;
+  --color-danger-line: #f3c0bb;
+  --color-info-soft: #e7f0fb;
+  --color-info-line: #bcd4ef;
+  --color-info-ink: #1c4f82;
+  --color-ok-soft: #e7f6ec;
+  --color-ok-ink: #1d6b3a;
+  --color-bad-soft: #fdecec;
+  --color-bad-ink: #9f1d1d;
+
+  --radius-lg: 0.5rem;
 }
 
-:root { color-scheme: dark; }
-body { @apply bg-zinc-950 text-zinc-200 antialiased; font-family: ui-sans-serif, system-ui, sans-serif; }
+:root { color-scheme: light; }
+html { font-size: 16px; }
+body { @apply bg-canvas text-ink antialiased; font-family: var(--font-sans); }
 button, select, input, textarea { @apply outline-none; }
-:focus-visible { @apply ring-2 ring-sky-400; }
+:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+::selection { background: var(--color-accent-soft); }
