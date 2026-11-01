@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { BENCH_RUN_OPTIONS, TARGET_SAMPLE_MS } from '../domain/benchmark';
-import { indexName } from '../domain/schema';
+import { indexName, validateIdentifier } from '../domain/schema';
 import type { Lab } from '../hooks/useLab';
 import { PlanTree, TimingLine } from './PlanViewer';
 import { Button, Panel, inputCls } from './ui';
@@ -19,6 +19,8 @@ export function PlanPanel({ lab }: { lab: Lab }) {
   const second = c2 !== first && cols.includes(c2) ? c2 : '';
   const picked = second ? [first, second] : [first];
   const exists = table?.indexes.some((i) => i.name === indexName(table.name, picked));
+  // Index DDL is built from validated identifiers; tables/columns created through raw SQL may use other names.
+  const plainNames = !!table && [table.name, ...picked].every((n) => validateIdentifier(n) === null);
 
   return (
     <div className="space-y-4">
@@ -60,7 +62,7 @@ export function PlanPanel({ lab }: { lab: Lab }) {
               </select>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <Button variant="primary" disabled={lab.busy !== null || !lab.benchmarkable || exists} onClick={() => lab.compareWithIndex(table.name, picked)}>
+              <Button variant="primary" disabled={lab.busy !== null || !lab.benchmarkable || exists || !plainNames} onClick={() => lab.compareWithIndex(table.name, picked)}>
                 Create index &amp; compare
               </Button>
               <label className="flex items-center gap-1 text-xs text-zinc-400">samples
@@ -70,7 +72,8 @@ export function PlanPanel({ lab }: { lab: Lab }) {
               </label>
             </div>
             <p className="mt-2 text-xs text-zinc-500">
-              {exists ? 'That index already exists; drop it below to repeat the experiment.'
+              {!plainNames ? 'Index experiments need plain names (letters, digits, underscore). Create the index yourself in the SQL editor instead.'
+                : exists ? 'That index already exists; drop it below to repeat the experiment.'
                 : lab.benchmarkable ? 'Benchmarks the SQL in the editor, creates the index, benchmarks again, and shows both plans.'
                 : 'Comparison needs a single SELECT / WITH query in the editor (it is run repeatedly).'}
             </p>

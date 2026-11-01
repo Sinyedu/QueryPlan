@@ -31,21 +31,41 @@ export function classifyDetail(detail: string): Pick<PlanNode, 'kind' | 'index'>
   return { kind: 'other' };
 }
 
-/** Build a forest using parent ids. Rows whose parent is missing become roots. */
+/**
+ * Build a forest using parent ids. Rows whose parent is missing become roots. Duplicate ids are ignored and a
+ * link that would create a cycle is treated as a root, so malformed input can never loop or hide steps.
+ */
 export function parsePlan(rows: readonly RawPlanRow[]): PlanNode[] {
   const nodes = new Map<number, PlanNode>();
-  for (const r of rows) nodes.set(r.id, { id: r.id, parent: r.parent, detail: r.detail, children: [], ...classifyDetail(r.detail) });
-  const roots: PlanNode[] = [];
+  const order: PlanNode[] = [];
   for (const r of rows) {
-    const node = nodes.get(r.id)!;
-    const parent = r.parent !== r.id ? nodes.get(r.parent) : undefined;
-    (parent ? parent.children : roots).push(node);
+    if (nodes.has(r.id)) continue;
+    const node: PlanNode = { id: r.id, parent: r.parent, detail: r.detail, children: [], ...classifyDetail(r.detail) };
+    nodes.set(r.id, node);
+    order.push(node);
+  }
+  const attachedTo = new Map<PlanNode, PlanNode>();
+  const roots: PlanNode[] = [];
+  for (const node of order) {
+    const parent = node.parent !== node.id ? nodes.get(node.parent) : undefined;
+    let cycle = false;
+    for (let up: PlanNode | undefined = parent; up; up = attachedTo.get(up)) {
+      if (up === node) { cycle = true; break; }
+    }
+    if (parent && !cycle) { parent.children.push(node); attachedTo.set(node, parent); } else roots.push(node);
   }
   return roots;
 }
 
+/** Pre-order flatten without recursion, so very deep input cannot overflow the stack. */
 export function flattenPlan(roots: readonly PlanNode[], depth = 0): { node: PlanNode; depth: number }[] {
-  return roots.flatMap((n) => [{ node: n, depth }, ...flattenPlan(n.children, depth + 1)]);
+  const out: { node: PlanNode; depth: number }[] = [];
+  const stack = [...roots].reverse().map((node) => ({ node, depth }));
+  for (let item = stack.pop(); item; item = stack.pop()) {
+    out.push(item);
+    for (let i = item.node.children.length - 1; i >= 0; i--) stack.push({ node: item.node.children[i]!, depth: item.depth + 1 });
+  }
+  return out;
 }
 
 export function planSummary(rows: readonly RawPlanRow[]): string {
@@ -124,4 +144,12 @@ export function planInsights(rows: readonly RawPlanRow[]): string[] {
     out.push('A temporary sort/group structure is used; an index matching the ORDER BY / GROUP BY columns can sometimes remove it.');
   }
   return out;
+}
+
+/**
+ * EXPLAIN QUERY PLAN is only meaningful for statements that read or write rows. Running it after DDL such as
+ * CREATE TABLE would re-compile the statement against the *changed* schema and report a bogus error.
+ */
+export function isExplainable(sql: string): boolean {
+  return /^\s*(select|with|insert|update|delete|replace|values)\b/i.test(sql);
 }

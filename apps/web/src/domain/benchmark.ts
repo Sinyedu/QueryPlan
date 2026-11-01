@@ -17,6 +17,7 @@ export const TARGET_SAMPLE_MS = 10;
 export const MAX_REPS = 200;
 
 export function repsFor(warmupMs: number): number {
+  if (!Number.isFinite(warmupMs)) return 1; // unknown or absurd warm-up: do not repeat
   return Math.min(MAX_REPS, Math.max(1, Math.ceil(TARGET_SAMPLE_MS / Math.max(warmupMs, 0.01))));
 }
 
