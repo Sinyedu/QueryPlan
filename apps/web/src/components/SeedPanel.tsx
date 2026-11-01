@@ -21,6 +21,12 @@ export function SeedPanel({ lab }: { lab: Lab }) {
       </p>
       <div className="mt-2 flex items-center gap-2">
         <Button variant="primary" disabled={!exists || lab.busy !== null} onClick={lab.seed}>Seed table</Button>
+        {lab.busy === 'seed' && (
+          <Button variant="danger"
+            onClick={() => { if (window.confirm('Stopping terminates the database worker and CLEARS the in-memory database. Continue?')) lab.cancel(); }}>
+            Stop (clears DB)
+          </Button>
+        )}
         {!exists && <span className="text-xs text-zinc-500">Create the table first.</span>}
       </div>
       {progress && (

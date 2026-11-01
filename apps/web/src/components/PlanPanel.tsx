@@ -44,7 +44,7 @@ export function PlanPanel({ lab }: { lab: Lab }) {
             </div>
             <p className="mt-2 text-xs text-zinc-500">
               {lab.benchmarkable
-                ? 'Benchmarks the SQL in the editor (5 runs), creates the index, benchmarks again, and shows both plans.'
+                ? 'Benchmarks the SQL in the editor (1 discarded warm-up + 5 timed runs), creates the index, benchmarks again, and shows both plans.'
                 : 'Comparison needs a single SELECT / WITH query in the editor (it is run repeatedly).'}
             </p>
             {table.indexes.length > 0 && (

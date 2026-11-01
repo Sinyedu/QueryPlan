@@ -62,6 +62,20 @@ try {
   await page.getByRole('tree').getByText(/^SCAN users/).waitFor({ timeout: 20_000 });
   check(true, 'guided example ends on a scan plan');
 
+  await page.getByLabel('SQL editor').fill('WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT count(*) FROM c');
+  await page.getByRole('button', { name: 'Run & explain' }).click();
+  page.once('dialog', (d) => d.accept());
+  await page.getByRole('button', { name: /Stop \(clears DB\)/ }).click();
+  await page.getByText(/Canceled: worker terminated/).first().waitFor({ timeout: 10_000 });
+  check(true, 'Stop terminates a runaway query and reports it');
+
+  const mobile = await browser.newPage({ viewport: { width: 390, height: 800 } });
+  await mobile.goto(URL_);
+  await mobile.getByTestId('engine-info').filter({ hasText: /SQLite \d/ }).waitFor({ timeout: 20_000 });
+  const overflow = await mobile.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  check(overflow <= 0, `no horizontal overflow at 390px width (overflow=${overflow})`);
+  await mobile.close();
+
   page.once('dialog', (d) => d.accept());
   await page.getByRole('button', { name: 'Reset database' }).click();
   await page.getByText('Empty. No tables yet.').waitFor();
