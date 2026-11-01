@@ -49,6 +49,12 @@ try {
   await page.getByRole('tree').getByText(/^SCAN users/).waitFor({ timeout: 10_000 });
   check(true, 'plan shows SCAN before index');
 
+  await page.getByRole('button', { name: 'graph', exact: true }).click();
+  await page.getByRole('group', { name: 'Query plan graph' }).getByRole('button', { name: /^SCAN users/ }).click();
+  await page.getByRole('note').getByText(/Reads every row of users/).waitFor();
+  check(true, 'SVG plan graph renders and shows a per-step note');
+  await page.getByRole('button', { name: 'list', exact: true }).click();
+
   await page.getByRole('button', { name: /Create index/ }).click();
   await page.getByRole('tree', { name: /After index/ }).getByText(/SEARCH users USING INDEX idx_users_email/).waitFor({ timeout: 20_000 });
   check(true, 'plan shows SEARCH ... USING INDEX after index');

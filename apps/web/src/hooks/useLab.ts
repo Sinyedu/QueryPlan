@@ -3,7 +3,7 @@ import { SqliteClient } from '../db/sqlite-client';
 import type { EngineInfo, SchemaInfo } from '../db/protocol';
 import { DEFAULT_TABLE, buildCreateIndex, buildDropIndex, indexName, type TableDef } from '../domain/schema';
 import { DEFAULT_SEED, generateRow } from '../domain/seeding';
-import { BENCH_RUNS, isBenchmarkable, summarizeTimes } from '../domain/benchmark';
+import { BENCH_RUNS, isBenchmarkable, repsFor, summarizeTimes } from '../domain/benchmark';
 import { QUERY_LIMITS, type Busy, type PlanSnapshot, type QueryState, type SeedProgress } from './types';
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -63,12 +63,13 @@ export function useLab() {
     await refreshSchema();
   }, (m) => setSeedMsg(`Seed failed: ${m}`)).finally(() => setProgress(null)), [engine, table, rowCount, refreshSchema, run]);
 
-  /** One discarded warm-up run, then `runs` timed executions; returns a timing summary plus the last result. */
+  /** One discarded warm-up run sizes the repeat count; then `runs` samples, each the mean of `reps` executions. */
   const bench = useCallback(async (text: string, runs: number) => {
     const samples: number[] = [];
     let last = await engine.execute(text, QUERY_LIMITS);
-    for (let i = 0; i < runs; i++) { last = await engine.execute(text, QUERY_LIMITS); samples.push(last.elapsedMs); }
-    return { last, timing: summarizeTimes(samples) };
+    const repeat = repsFor(last.elapsedMs);
+    for (let i = 0; i < runs; i++) { last = await engine.execute(text, { ...QUERY_LIMITS, repeat }); samples.push(last.elapsedMs); }
+    return { last, timing: summarizeTimes(samples, repeat) };
   }, [engine]);
 
   const snapshot = useCallback(async (label: string, text: string, runs: number): Promise<PlanSnapshot> => {

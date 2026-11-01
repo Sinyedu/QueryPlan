@@ -89,10 +89,25 @@ describe('explain parsing', () => {
 describe('benchmark helpers', () => {
   it('summarizes timings', async () => {
     const { summarizeTimes, isBenchmarkable } = await import('./benchmark');
-    expect(summarizeTimes([5, 1, 3])).toEqual({ runs: 3, minMs: 1, medianMs: 3, maxMs: 5 });
+    expect(summarizeTimes([5, 1, 3])).toEqual({ runs: 3, minMs: 1, medianMs: 3, maxMs: 5, repsPerSample: 1 });
+    const { repsFor } = await import('./benchmark');
+    expect(repsFor(2)).toBe(5);
+    expect(repsFor(0)).toBe(200);
+    expect(repsFor(5000)).toBe(1);
     expect(summarizeTimes([1, 2, 3, 4]).medianMs).toBe(2.5);
     expect(isBenchmarkable('SELECT 1;')).toBe(true);
     expect(isBenchmarkable('DELETE FROM t')).toBe(false);
     expect(isBenchmarkable('SELECT 1; DROP TABLE t')).toBe(false);
+  });
+});
+
+describe('node descriptions', () => {
+  it('derives notes from the step detail only', async () => {
+    const { describeNode, classifyDetail } = await import('./explain');
+    const d = (detail: string) => describeNode({ detail, ...classifyDetail(detail) }).text;
+    expect(d('SCAN orders')).toMatch(/Reads every row of orders/);
+    expect(d('SEARCH users USING INDEX idx_users_email (email=?)')).toMatch(/idx_users_email.*users on email/);
+    expect(d('SCAN users USING COVERING INDEX idx_a')).toMatch(/idx_a.*not touched/);
+    expect(d('USE TEMP B-TREE FOR ORDER BY')).toMatch(/temporary B-tree/);
   });
 });

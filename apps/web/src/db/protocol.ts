@@ -16,6 +16,8 @@ export interface ExecuteOptions {
   maxRows: number;
   /** Cooperative in-worker time budget; the client adds a hard watchdog on top. */
   timeoutMs: number;
+  /** Benchmarking only (read-only SELECT/WITH): run the statement N times and report the mean elapsed time. */
+  repeat?: number;
 }
 
 export interface ExecuteResult {
