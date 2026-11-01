@@ -3,7 +3,7 @@
  * Uses an in-memory database; nothing persists across reloads or worker restarts.
  */
 import type { Database, Sqlite3Static } from '@sqlite.org/sqlite-wasm';
-import { buildCreateTable, buildInsert, orderTables, quoteIdentifier, validateSchema, type TableDef } from '../domain/schema';
+import { buildCreateTable, buildInsert, orderTables, quoteExistingName, quoteIdentifier, validateSchema, type TableDef } from '../domain/schema';
 import { isBenchmarkable } from '../domain/benchmark';
 import { MAX_TOTAL_ROWS, clampedCounts, generateBatches, tableSeed } from '../domain/seeding';
 import type { RawPlanRow } from '../domain/explain';
@@ -15,6 +15,14 @@ const MAX_CELL_CHARS = 2_000;
 /** Memory budget: 16384 pages * 4 KiB = 64 MiB of database. */
 const MAX_PAGES = 16_384;
 const PROGRESS_OPS = 2_000;
+/** Largest single value (string/blob) and SQL text SQLite will accept; far below the library defaults of ~1 GB. */
+const MAX_VALUE_BYTES = 5_000_000;
+const MAX_SQL_BYTES = 500_000;
+/** PRAGMAs that could lift the memory budget or break schema invariants; denied for user SQL. */
+const DENIED_PRAGMAS = new Set([
+  'max_page_count', 'page_size', 'writable_schema', 'schema_version', 'soft_heap_limit', 'hard_heap_limit',
+  'mmap_size', 'temp_store_directory', 'data_store_directory',
+]);
 
 export class SqliteCoreError extends Error {
   constructor(message: string, readonly kind: 'sql' | 'validation' | 'timeout', readonly code?: number) {
@@ -40,6 +48,7 @@ export class SqliteSession {
     this.db = new sqlite3.oo1.DB(':memory:', 'c');
     this.db.exec(`PRAGMA max_page_count = ${MAX_PAGES}`);
     this.db.exec('PRAGMA foreign_keys = ON'); // declared foreign keys are really enforced
+    this.lockDown(sqlite3);
     // Cooperative time budget: returning non-zero makes SQLite abort the running statement.
     sqlite3.capi.sqlite3_progress_handler(
       this.db.pointer!,
@@ -53,6 +62,40 @@ export class SqliteSession {
       },
       0,
     );
+  }
+
+  /**
+   * Applied after our own setup PRAGMAs, so it constrains user SQL only: lower value/SQL size limits, no ATTACH
+   * (a second database would sit outside the page budget), and no PRAGMA that lifts the budget.
+   */
+  private lockDown(sqlite3: Sqlite3Static): void {
+    const { capi } = sqlite3;
+    const ptr = this.db.pointer!;
+    capi.sqlite3_limit(ptr, capi.SQLITE_LIMIT_LENGTH, MAX_VALUE_BYTES);
+    capi.sqlite3_limit(ptr, capi.SQLITE_LIMIT_SQL_LENGTH, MAX_SQL_BYTES);
+    capi.sqlite3_limit(ptr, capi.SQLITE_LIMIT_ATTACHED, 0);
+    capi.sqlite3_set_authorizer(
+      ptr,
+      (_arg, action, arg1) => {
+        if (action === capi.SQLITE_ATTACH || action === capi.SQLITE_DETACH) return capi.SQLITE_DENY;
+        if (action === capi.SQLITE_PRAGMA && typeof arg1 === 'string' && DENIED_PRAGMAS.has(arg1.toLowerCase())) return capi.SQLITE_DENY;
+        return capi.SQLITE_OK;
+      },
+      0,
+    );
+  }
+
+  /** Benchmarks repeat a statement, so it must be one statement and genuinely read-only (a WITH can front a DELETE). */
+  private assertSingleReadOnly(sql: string): void {
+    if (!isBenchmarkable(sql)) throw new SqliteCoreError('Only a single SELECT/WITH statement can be repeated.', 'validation');
+    const stmt = this.guarded(5_000, () => this.db.prepare(sql));
+    try {
+      if (!this.sqlite3.capi.sqlite3_stmt_readonly(stmt.pointer!)) {
+        throw new SqliteCoreError('Only read-only statements can be benchmarked; this one modifies the database.', 'validation');
+      }
+    } finally {
+      stmt.finalize();
+    }
   }
 
   info(): EngineInfo {
@@ -77,9 +120,9 @@ export class SqliteSession {
     }
   }
 
-  execute(sql: string, { maxRows, timeoutMs, repeat = 1 }: ExecuteOptions): ExecuteResult {
+  execute(sql: string, { maxRows, timeoutMs, repeat = 1, requireReadOnly = false }: ExecuteOptions): ExecuteResult {
     if (sql.trim() === '') throw new SqliteCoreError('Enter a SQL statement to run.', 'validation');
-    if (repeat > 1 && !isBenchmarkable(sql)) throw new SqliteCoreError('Only a single SELECT/WITH statement can be repeated.', 'validation');
+    if (repeat > 1 || requireReadOnly) this.assertSingleReadOnly(sql);
     const columns: string[] = [];
     const rows: Cell[][] = [];
     let totalRows = 0;
@@ -110,9 +153,17 @@ export class SqliteSession {
     const stmt = sql.trim().replace(/;+\s*$/, '');
     if (stmt === '') throw new SqliteCoreError('Enter a SQL statement to explain.', 'validation');
     if (/^explain\b/i.test(stmt)) throw new SqliteCoreError('Remove EXPLAIN from the query; QueryPlan adds it for you.', 'validation');
-    const rows = this.guarded(timeoutMs, () =>
-      this.db.exec({ sql: `EXPLAIN QUERY PLAN ${stmt}`, rowMode: 'object', returnValue: 'resultRows' }),
-    ) as unknown as RawPlanRow[];
+    // prepare() compiles only the first statement, so anything smuggled after a ';' is never executed.
+    const rows = this.guarded(timeoutMs, () => {
+      const st = this.db.prepare(`EXPLAIN QUERY PLAN ${stmt}`);
+      try {
+        const out: RawPlanRow[] = [];
+        while (st.step()) out.push(st.get({}) as unknown as RawPlanRow);
+        return out;
+      } finally {
+        st.finalize();
+      }
+    });
     return { rows: rows.map((r) => ({ id: Number(r.id), parent: Number(r.parent), notused: Number(r.notused), detail: String(r.detail) })) };
   }
 
@@ -181,7 +232,7 @@ export class SqliteSession {
       "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
     ) as string[];
     const tables: TableInfo[] = names.map((name) => {
-      const q = quoteIdentifier(name);
+      const q = quoteExistingName(name); // names come from sqlite_schema and may be anything user SQL created
       const cols = this.db.exec({ sql: `PRAGMA table_info(${q})`, rowMode: 'object', returnValue: 'resultRows' }) as unknown as Record<string, unknown>[];
       const idx = this.db.exec({ sql: `PRAGMA index_list(${q})`, rowMode: 'object', returnValue: 'resultRows' }) as unknown as Record<string, unknown>[];
       const fks = this.db.exec({ sql: `PRAGMA foreign_key_list(${q})`, rowMode: 'object', returnValue: 'resultRows' }) as unknown as Record<string, unknown>[];

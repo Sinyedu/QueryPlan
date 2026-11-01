@@ -18,6 +18,8 @@ export interface ExecuteOptions {
   timeoutMs: number;
   /** Benchmarking only (read-only SELECT/WITH): run the statement N times and report the mean elapsed time. */
   repeat?: number;
+  /** Reject anything that is not a single read-only statement (used before benchmarking). */
+  requireReadOnly?: boolean;
 }
 
 export interface ExecuteResult {

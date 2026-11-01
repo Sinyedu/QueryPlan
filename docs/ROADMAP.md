@@ -36,6 +36,11 @@
   - [ ] Long share links can exceed URL length limits in some chat apps/browsers; export a file for large definitions.
   - [ ] SQL inside an imported experiment runs only when the user presses Run, but it is still arbitrary SQL against the user's own in-memory database; review it before running.
 
+### Hardening pass
+- [x] Adversarial and edge-case test suites (domain fuzzing, hostile SQL against real SQLite, worker-client fault injection, UI-level injection checks). They found and fixed: EXPLAIN executing trailing statements, `WITH … DELETE` passing the benchmark guard, user SQL lifting the memory budget, unlimited value/SQL size, ATTACH, schema refresh breaking on awkward table names, a bogus plan error after DDL, a TypeError on generator names like `__proto__`, plan parsing of cyclic/duplicate rows and stack overflow on very deep plans, and a NaN repeat count.
+- [ ] Safety behaviour is verified in Chromium only; Firefox/Safari WASM and authorizer behaviour are untested.
+- [ ] No fuzzing of the SQL parser itself (we rely on SQLite's limits and the authorizer).
+
 ### Phase 1 — known gaps
 - [ ] The multi-table UI and experiments panel were checked by an automated Chrome test and at one desktop viewport; not reviewed on a phone or in Firefox/Safari.
 - [ ] Index experiment supports 1–2 column indexes only (no unique, partial or expression indexes).

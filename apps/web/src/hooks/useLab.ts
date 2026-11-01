@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SqliteClient } from '../db/sqlite-client';
 import type { EngineInfo, SchemaInfo } from '../db/protocol';
 import { DEFAULT_TABLE, buildCreateIndex, buildDropIndex, validateSchema } from '../domain/schema';
+import { isExplainable } from '../domain/explain';
 import { DEFAULT_SEED, type SeedTable } from '../domain/seeding';
 import { BENCH_RUNS, isBenchmarkable, repsFor, summarizeTimes } from '../domain/benchmark';
 import { EXPERIMENT_VERSION, type Experiment } from '../domain/experiment';
@@ -71,9 +72,10 @@ export function useLab() {
 
   const snapshot = useCallback(async (label: string, text: string, runs: number): Promise<PlanSnapshot> => {
     const samples: number[] = [];
-    let last = await engine.execute(text, QUERY_LIMITS); // discarded warm-up; sizes the repeat count
+    const bench = { ...QUERY_LIMITS, requireReadOnly: true }; // never repeat (or even warm up) a statement that writes
+    let last = await engine.execute(text, bench); // discarded warm-up; sizes the repeat count
     const repeat = repsFor(last.elapsedMs);
-    for (let i = 0; i < runs; i++) { last = await engine.execute(text, { ...QUERY_LIMITS, repeat }); samples.push(last.elapsedMs); }
+    for (let i = 0; i < runs; i++) { last = await engine.execute(text, { ...bench, repeat }); samples.push(last.elapsedMs); }
     let plan = null; let planError: string | undefined;
     try { plan = (await engine.explain(text)).rows; } catch (e) { planError = errMsg(e); }
     return { label, sql: text, plan, planError, timing: summarizeTimes(samples, repeat), totalRows: last.totalRows, indexes: indexNames(await engine.introspect()) };
@@ -84,11 +86,12 @@ export function useLab() {
     try {
       const result = await engine.execute(text, QUERY_LIMITS);
       setQuery({ status: 'ok', result });
-      let plan = null; let planError: string | undefined;
-      try { plan = (await engine.explain(text)).rows; } catch (e) { planError = errMsg(e); }
+      let plan = null; let planError: string | undefined; let planNote: string | undefined;
+      if (!isExplainable(text)) planNote = 'Query plans are shown for SELECT, INSERT, UPDATE and DELETE statements, not for DDL or PRAGMA.';
+      else try { plan = (await engine.explain(text)).rows; } catch (e) { planError = errMsg(e); }
       const fresh = await engine.introspect();
       setSchema(fresh);
-      setCurrent({ label: 'Latest run', sql: text, plan, planError, timing: summarizeTimes([result.elapsedMs]), totalRows: result.totalRows, indexes: indexNames(fresh) });
+      setCurrent({ label: 'Latest run', sql: text, plan, planError, planNote, timing: summarizeTimes([result.elapsedMs]), totalRows: result.totalRows, indexes: indexNames(fresh) });
     } catch (e) {
       setQuery({ status: 'error', message: errMsg(e), canceled: (e as { kind?: string }).kind === 'canceled' });
     } finally { setBusy(null); }

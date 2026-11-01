@@ -63,6 +63,14 @@ export function validateIdentifier(name: string): string | null {
   return null;
 }
 
+/**
+ * Quote a name that was read back FROM the database (it exists already, and user SQL may have created it with any
+ * characters). Escaping only; never use this for names typed into our own forms; those go through quoteIdentifier.
+ */
+export function quoteExistingName(name: string): string {
+  return `"${name.replaceAll('"', '""')}"`;
+}
+
 /** Quote an identifier for SQLite. Validates first; quoting is defence in depth. */
 export function quoteIdentifier(name: string): string {
   const err = validateIdentifier(name);
@@ -95,7 +103,9 @@ export function validateTable(def: TableDef): SchemaIssue[] {
     if (err) issues.push({ column: i, message: err });
     else if (seen.has(col.name.toLowerCase())) issues.push({ column: i, message: `Duplicate column "${col.name}".` });
     seen.add(col.name.toLowerCase());
-    if (!GENERATOR_TYPES[col.generator]?.includes(col.type)) {
+    // hasOwn: a generator named "__proto__" or "constructor" must be a validation error, not a TypeError.
+    const allowed = Object.hasOwn(GENERATOR_TYPES, col.generator) ? GENERATOR_TYPES[col.generator] : undefined;
+    if (!allowed?.includes(col.type)) {
       issues.push({ column: i, message: `Generator "${col.generator}" cannot fill a ${col.type} column.` });
     }
     if (col.primaryKey && col.type !== 'INTEGER') {
@@ -172,8 +182,9 @@ export function buildCreateIndex(table: string, columns: string | readonly strin
   return `CREATE INDEX ${quoteIdentifier(indexName(table, columns))} ON ${quoteIdentifier(table)} (${cols})`;
 }
 
+/** `name` comes from the database listing, so it may be any existing index name. */
 export function buildDropIndex(name: string): string {
-  return `DROP INDEX ${quoteIdentifier(name)}`;
+  return `DROP INDEX ${quoteExistingName(name)}`;
 }
 
 export function buildInsert(def: TableDef): string {

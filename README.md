@@ -49,6 +49,8 @@ domain/  schema (identifiers, foreign keys, DDL) · seeding (PRNG, generators, d
 
 ## Safety, resource limits and worker limitations
 
+Full threat model, controls and test map: [`docs/SECURITY.md`](docs/SECURITY.md).
+
 - Identifiers are validated (`[A-Za-z_][A-Za-z0-9_]*`, ≤ 64 chars, no `sqlite_` prefix) **and** quoted; generated values are bound as parameters. Query text you type is executed as-is (it only touches your own in-memory database).
 - Results: ≤ 200 rows rendered, cells ≤ 2,000 chars; extra rows are counted but not materialized. Seeding is capped at 10,000 rows, ≤ 12 columns, database memory ≤ 64 MiB.
 - **Time budget:** a SQLite progress handler aborts statements that exceed 10 s (the database survives). Because WASM SQLite is synchronous, a hard stop is only possible by terminating the worker: the **Stop** button and a watchdog (budget + 3 s) do this, which **clears the in-memory database**. The UI says so.
@@ -73,3 +75,10 @@ An experiment is a definition (schema, row counts, seed, SQL) with **no row data
 - **Save** stores it in this browser's `localStorage`. The database itself is not persisted.
 - **Export / Import** use a JSON file. **Copy share link** puts the definition in the URL fragment (`#exp=…`); fragments are not sent to servers.
 - Imports and links are treated as untrusted: size limits, strict field and enum checks, identifier validation, unknown fields dropped. Loading only fills the editors; nothing runs until you press the buttons. The SQL in an experiment is arbitrary SQL for your own in-memory database, so read it before running.
+
+## Hardening summary
+
+SQL you type runs only against your own in-memory database, and the app blocks the ways that could hurt the tab or surprise you:
+`ATTACH`/`DETACH` and PRAGMAs that lift the memory budget are denied, single values are capped at 5 MB, `EXPLAIN` can never run a second
+smuggled statement, and benchmarks refuse anything that is not a single genuinely read-only statement (even a `WITH … DELETE`).
+Imported experiments and share links are validated as untrusted input.

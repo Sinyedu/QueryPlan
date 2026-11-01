@@ -103,6 +103,58 @@ try {
   await page.getByText(/Import rejected/).waitFor();
   check(true, 'malicious import is rejected');
 
+  // --- Safety: hostile and careless input through the real UI ---
+  const runSql = async (sql) => {
+    await page.getByLabel('SQL editor').fill(sql);
+    await page.getByRole('button', { name: 'Run & explain' }).click();
+  };
+  const XSS = '<img src=x onerror=window.__pwn=1>';
+
+  // The reload above cleared the in-memory database (by design), so rebuild the join example first.
+  await exampleRow('Join: orders by user').getByRole('button', { name: 'run' }).click();
+  await page.getByText(/Inserted 12,000 rows/).waitFor({ timeout: 30_000 });
+  await page.getByRole('list', { name: 'Reading this plan' }).waitFor({ timeout: 30_000 });
+
+  await runSql(`SELECT '${XSS}' AS x`);
+  await page.getByRole('cell', { name: XSS }).waitFor();
+  check((await page.evaluate(() => window.__pwn)) === undefined, 'HTML in query results is shown as text, not executed');
+  check((await page.locator('#root img').count()) === 0, 'no <img> element was created from result data');
+
+  await runSql('CRE');
+  await page.getByRole('alert').filter({ hasText: /syntax error/i }).waitFor();
+  await runSql('SELECT 42 AS answer');
+  await page.getByRole('cell', { name: '42', exact: true }).waitFor();
+  check(true, 'a typo ("CRE") shows a SQL error and the app keeps working');
+
+  await runSql("ATTACH DATABASE 'x.db' AS y");
+  await page.getByRole('alert').filter({ hasText: /not authorized/i }).waitFor();
+  await runSql('PRAGMA max_page_count = 2000000000');
+  await page.getByRole('alert').filter({ hasText: /not authorized/i }).waitFor();
+  check(true, 'ATTACH and budget-lifting PRAGMAs are blocked');
+
+  await runSql('CREATE TABLE "my table" (a INTEGER)');
+  await page.locator('p', { hasText: 'my table' }).first().waitFor();
+  check((await page.getByRole('alert').filter({ hasText: /already exists|my table/ }).count()) === 0, 'a table with an unusual name does not break the schema view or the plan panel');
+  await page.locator('#idx-table').selectOption('my table');
+  check(await page.getByRole('button', { name: /Create index/ }).isDisabled(), 'index experiment is disabled for names the form cannot quote safely');
+
+  await page.locator('#idx-table').selectOption('users');
+  await page.locator('#idx-col').selectOption('name');
+  await page.getByLabel('SQL editor').fill('WITH x AS (SELECT 1) DELETE FROM orders');
+  await page.getByRole('button', { name: /Create index/ }).click();
+  await page.getByText(/read-only/i).first().waitFor({ timeout: 10_000 });
+  await runSql('SELECT count(*) AS n FROM orders');
+  await page.getByRole('cell', { name: '10000', exact: true }).waitFor();
+  check(true, 'a write hidden behind WITH is refused by the benchmark and deletes nothing');
+
+  await page.getByLabel('Import experiment file').setInputFiles({
+    name: 'html.json', mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ version: 1, name: XSS, seed: 1, sql: 'SELECT 1', tables: [{ rowCount: 100, table: { name: 't', columns: [{ name: 'id', type: 'INTEGER', generator: 'sequence', primaryKey: true }] } }] })),
+  });
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByText(XSS, { exact: true }).first().waitFor();
+  check((await page.evaluate(() => window.__pwn)) === undefined && (await page.locator('#root img').count()) === 0, 'an experiment named with HTML is rendered as text');
+
   await page.getByLabel('SQL editor').fill('WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT count(*) FROM c');
   await page.getByRole('button', { name: 'Run & explain' }).click();
   page.once('dialog', (d) => d.accept());

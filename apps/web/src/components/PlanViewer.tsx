@@ -13,6 +13,7 @@ export function PlanTree({ snap }: { snap: PlanSnapshot }) {
   const [selected, setSelected] = useState<number | null>(null);
   const [view, setView] = useState<View>('list');
   if (snap.planError) return <Alert tone="error">{snap.planError}</Alert>;
+  if (snap.planNote) return <p className="text-sm text-zinc-400">{snap.planNote}</p>;
   if (!snap.plan || snap.plan.length === 0) return <p className="text-sm text-zinc-500">SQLite returned no plan rows for this statement.</p>;
 
   const roots = parsePlan(snap.plan);
