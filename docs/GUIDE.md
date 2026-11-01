@@ -53,7 +53,8 @@ SQLite decides the plan, so the exact wording can vary by version. The app never
 
 ### Run SQL
 - Type SQL in the editor; **Ctrl/⌘ + Enter** or **Run & explain**. Several statements at once are allowed.
-- **Results** show at most 200 rows. The header says the real row count, e.g. `10,000 rows (showing first 200)`, plus the measured time.
+- **Show up to N rows** (next to Run) is yours to choose: 1 to 5,000, default 200, remembered in this browser. **Results** show that many rows; the header says the real row count, e.g. `10,000 rows (showing first 200)`, plus the measured time.
+- Big results stay fast because the table is *virtualized*: only the rows on screen exist in the page, so scrolling through 5,000 rows is smooth. Very wide or long values can hit an 8 MB data limit first; the message then says so.
 - Errors appear in red. Typos such as `CRE` or `SELEC` give a SQLite error and the app keeps working.
 - Plans are shown for SELECT / INSERT / UPDATE / DELETE. For `CREATE TABLE` and similar you get a note instead.
 - Queries over 10 seconds are interrupted and your data survives. If the worker stops responding, **Stop (clears DB)** (or the automatic watchdog) restarts it, which **empties the database**.
@@ -121,6 +122,7 @@ Tick these off in a fresh page (refresh first). **Expected** is what you should 
 | B5 | Name two columns `id` and `ID` | `Duplicate column` message |
 | B6 | Make a foreignKey with no parent chosen, or point two tables at each other | `Choose the parent…` / cycle message |
 | B7 | Set a row count of `5` or `999999` and leave the field | Value snaps to 100 / 10,000 |
+| B10 | Type `99999` or `0` in "Show up to" and leave the field | Snaps to 5,000 / 1 |
 | B8 | Total rows over 30,000 across tables | Amber warning; Seed is disabled |
 | B9 | Create an index that already exists | Button disabled with an explanation |
 
@@ -143,6 +145,7 @@ Tick these off in a fresh page (refresh first). **Expected** is what you should 
 ### D. Layout and browsers
 | # | Do | Expected |
 | --- | --- | --- |
+| D4 | Set "Show up to" to 5,000 and run `WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x < 6000) SELECT x FROM c` | `6,000 rows (showing first 5,000)`; scrolling is smooth; the last row you can reach is 5000 |
 | D1 | Narrow the window to phone width (about 390 px) | Panels stack; no horizontal page scroll |
 | D2 | Open the site in Firefox and Safari | **Not yet tested.** Note anything broken |
 | D3 | Open DevTools → Console during A1–A13 | No red errors |
