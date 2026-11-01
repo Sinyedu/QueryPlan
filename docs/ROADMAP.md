@@ -46,6 +46,11 @@
 - [ ] Connecting by dragging is pointer-only. The keyboard path is the "references" menu in the schema form. Touch uses pointer events but is untested on real touch hardware.
 - [ ] Only many-to-one links to a sequence-filled integer primary key (no many-to-many, composite or ON DELETE settings). Changing a referenced primary key's generator shows a validation message rather than rewriting the links.
 
+### Results display
+- [x] User-chosen row limit (1-5,000, default 200, persisted in localStorage) with an engine-enforced ceiling of 5,000, an 8 MB returned-data budget, and a virtualized results table (only visible rows are in the DOM). Benchmarks and DDL request no rows.
+- [ ] Columns have a fixed minimum width and single-line cells; no column resizing or wrapped cell view yet.
+- [ ] Virtualization was verified with Chrome only; scroll feel on touch devices is untested.
+
 ### Hardening pass
 - [x] Adversarial and edge-case test suites (domain fuzzing, hostile SQL against real SQLite, worker-client fault injection, UI-level injection checks). They found and fixed: EXPLAIN executing trailing statements, `WITH … DELETE` passing the benchmark guard, user SQL lifting the memory budget, unlimited value/SQL size, ATTACH, schema refresh breaking on awkward table names, a bogus plan error after DDL, a TypeError on generator names like `__proto__`, plan parsing of cyclic/duplicate rows and stack overflow on very deep plans, and a NaN repeat count.
 - [ ] Safety behaviour is verified in Chromium only; Firefox/Safari WASM and authorizer behaviour are untested.

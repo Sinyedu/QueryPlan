@@ -13,7 +13,7 @@ the UI did not announce. The database is the visitor's own in-memory SQLite, so 
 | Memory exhaustion | 64 MiB page budget; `max_page_count`, `page_size`, heap-limit and similar PRAGMAs are denied by a SQLite authorizer; single values ≤ 5 MB; SQL text ≤ 500 KB | `sqlite-core.ts` (`lockDown`) |
 | Reaching outside the sandbox | `ATTACH`/`DETACH` denied and attached-DB limit 0; no extension loading in the WASM build | `sqlite-core.ts` |
 | Runaway queries | Progress-handler time budget (database survives), plus a watchdog that terminates the worker (database lost, and the UI says so) | `sqlite-core.ts`, `sqlite-client.ts` |
-| Huge results | Rows counted but only 200 materialized; cells truncated at 2,000 chars; blobs shown as `<BLOB n bytes>` | `sqlite-core.ts`, `ResultsTable.tsx` |
+| Huge results | Rows counted but only the user-chosen limit materialized (hard ceiling 5,000, enforced in the engine); returned data also capped at 8 MB; cells truncated at 2,000 chars; blobs shown as `<BLOB n bytes>`; the table renders only visible rows | `sqlite-core.ts`, `ResultsTable.tsx` |
 | EXPLAIN smuggling | Only the first statement is compiled and stepped, so `SELECT 1; DROP TABLE x` cannot run the second statement | `sqlite-core.ts` |
 | Benchmarks mutating data | Repeated/benchmarked statements must be a single statement **and** `sqlite3_stmt_readonly` (a `WITH … DELETE` is refused, including the warm-up run) | `sqlite-core.ts`, `useLab.ts` |
 | Untrusted experiments (import, share link, localStorage) | `parseExperiment`: size caps, strict types, enum checks, identifier/schema validation, unknown fields dropped, prototype-pollution safe; loading only fills editors and never runs SQL | `domain/experiment.ts` |

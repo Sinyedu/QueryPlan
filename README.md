@@ -6,6 +6,8 @@ Everything runs in the visitor's browser (SQLite compiled to WebAssembly, inside
 
 ## Quick start
 
+**New here? Read [`docs/GUIDE.md`](docs/GUIDE.md): how to use the site, a 2-minute tour, and a manual test checklist.**
+
 Requires Node 22+ and pnpm.
 
 ```bash
@@ -23,7 +25,7 @@ pnpm --filter web e2e   # optional: real-browser smoke test (needs Chrome or Edg
 0. Optional: open the **Designer** tab to lay out tables on a diagram and connect them by dragging from a column to another table's primary key.
 1. Edit the schema: up to 6 tables, typed columns, data generators, optional foreign keys to another table's sequence-filled integer primary key. **Create tables** (parents first).
 2. **Seed all tables**: 100–10,000 rows each (30,000 total), deterministic for a chosen seed, optional `skewed` distributions, 500-row batches in one transaction, progress bar.
-3. Run SQL (`Ctrl/⌘+Enter`). Results are capped at 200 rendered rows; the true row count and measured elapsed time are shown.
+3. Run SQL (`Ctrl/⌘+Enter`). You choose how many rows to show (default 200, up to 5,000); the true row count and measured elapsed time are always shown.
 4. Read the plan as a list or SVG graph (parent/child from SQLite's `id`/`parent`, raw detail strings preserved; click a step for a plain-language note).
 5. **Create index & compare** benchmarks the query (1 discarded warm-up, then 5 samples, each the mean of many repeated executions; median reported), creates the index, benchmarks again and shows both plans.
 
@@ -53,7 +55,7 @@ domain/  schema (identifiers, foreign keys, DDL) · seeding (PRNG, generators, d
 Full threat model, controls and test map: [`docs/SECURITY.md`](docs/SECURITY.md).
 
 - Identifiers are validated (`[A-Za-z_][A-Za-z0-9_]*`, ≤ 64 chars, no `sqlite_` prefix) **and** quoted; generated values are bound as parameters. Query text you type is executed as-is (it only touches your own in-memory database).
-- Results: ≤ 200 rows rendered, cells ≤ 2,000 chars; extra rows are counted but not materialized. Seeding is capped at 10,000 rows, ≤ 12 columns, database memory ≤ 64 MiB.
+- Results: you pick the row limit (1–5,000, default 200, remembered in this browser); the table is virtualized so 5,000 rows render only what is on screen. Cells ≤ 2,000 chars and returned data ≤ 8 MB; extra rows are counted but not returned. Seeding is capped at 10,000 rows, ≤ 12 columns, database memory ≤ 64 MiB.
 - **Time budget:** a SQLite progress handler aborts statements that exceed 10 s (the database survives). Because WASM SQLite is synchronous, a hard stop is only possible by terminating the worker: the **Stop** button and a watchdog (budget + 3 s) do this, which **clears the in-memory database**. The UI says so.
 - **In-memory only.** Refreshing the page clears everything. OPFS persistence is not implemented, so nothing is claimed about it.
 

@@ -5,13 +5,13 @@
 import type { Database, Sqlite3Static } from '@sqlite.org/sqlite-wasm';
 import { buildCreateTable, buildInsert, orderTables, quoteExistingName, quoteIdentifier, validateSchema, type TableDef } from '../domain/schema';
 import { isBenchmarkable } from '../domain/benchmark';
+import { MAX_CELL_CHARS, MAX_RESULT_BYTES, MAX_ROW_LIMIT, estimateRowBytes } from '../domain/results';
 import { MAX_TOTAL_ROWS, clampedCounts, generateBatches, tableSeed } from '../domain/seeding';
 import type { RawPlanRow } from '../domain/explain';
 import type {
   Cell, EngineInfo, ExecuteOptions, ExecuteResult, ExplainResult, SchemaInfo, SeedRequest, SeedResult, TableInfo,
 } from './protocol';
 
-const MAX_CELL_CHARS = 2_000;
 /** Memory budget: 16384 pages * 4 KiB = 64 MiB of database. */
 const MAX_PAGES = 16_384;
 const PROGRESS_OPS = 2_000;
@@ -123,9 +123,12 @@ export class SqliteSession {
   execute(sql: string, { maxRows, timeoutMs, repeat = 1, requireReadOnly = false }: ExecuteOptions): ExecuteResult {
     if (sql.trim() === '') throw new SqliteCoreError('Enter a SQL statement to run.', 'validation');
     if (repeat > 1 || requireReadOnly) this.assertSingleReadOnly(sql);
+    const rowCap = Number.isFinite(maxRows) ? Math.min(MAX_ROW_LIMIT, Math.max(0, Math.floor(maxRows))) : 0;
     const columns: string[] = [];
     const rows: Cell[][] = [];
     let totalRows = 0;
+    let bytes = 0;
+    let byteLimited = false;
     const start = performance.now();
     this.guarded(timeoutMs, () => {
       for (let rep = 0; rep < repeat; rep++) {
@@ -136,14 +139,18 @@ export class SqliteSession {
           callback: (row: unknown) => {
             if (rep > 0) return; // rows are collected on the first pass only
             totalRows++;
-            if (rows.length < maxRows) rows.push((row as unknown[]).map(toCell));
+            if (rows.length >= rowCap || byteLimited) return; // keep counting, stop materializing
+            const cells = (row as unknown[]).map(toCell);
+            bytes += estimateRowBytes(cells);
+            if (bytes > MAX_RESULT_BYTES) byteLimited = true;
+            else rows.push(cells);
           },
         });
       }
     });
     const elapsedMs = (performance.now() - start) / repeat;
     return {
-      columns, rows, totalRows, truncated: totalRows > rows.length,
+      columns, rows, totalRows, truncated: totalRows > rows.length, byteLimited,
       rowsAffected: columns.length === 0 ? this.db.changes() : null,
       elapsedMs,
     };

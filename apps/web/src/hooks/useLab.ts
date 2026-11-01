@@ -8,9 +8,15 @@ import { BENCH_RUNS, isBenchmarkable, repsFor, summarizeTimes } from '../domain/
 import { EXPERIMENT_VERSION, type Experiment } from '../domain/experiment';
 import { GUIDED_EXAMPLE } from '../domain/examples';
 import { useSchemaDesign } from './useSchemaDesign';
-import { QUERY_LIMITS, type Busy, type PlanSnapshot, type QueryState, type SeedProgress } from './types';
+import { DEFAULT_ROW_LIMIT, clampRowLimit } from '../domain/results';
+import { QUERY_TIMEOUT_MS, type Busy, type PlanSnapshot, type QueryState, type SeedProgress } from './types';
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const ROW_LIMIT_KEY = 'queryplan.rowLimit.v1';
+/** A per-viewer convenience only: storage may be blocked, so every access is guarded. */
+const loadRowLimit = (): number => {
+  try { return clampRowLimit(Number(localStorage.getItem(ROW_LIMIT_KEY) ?? DEFAULT_ROW_LIMIT)); } catch { return DEFAULT_ROW_LIMIT; }
+};
 const indexNames = (s: SchemaInfo) => s.tables.flatMap((t) => t.indexes.map((i) => i.name));
 
 export function useLab() {
@@ -31,6 +37,16 @@ export function useLab() {
   const [current, setCurrent] = useState<PlanSnapshot | null>(null);
   const [before, setBefore] = useState<PlanSnapshot | null>(null);
   const [benchRuns, setBenchRuns] = useState<number>(BENCH_RUNS);
+  const [rowLimit, setRowLimitState] = useState(loadRowLimit);
+  const rowLimitRef = useRef(rowLimit);
+  rowLimitRef.current = rowLimit;
+  const setRowLimit = useCallback((n: number) => {
+    const v = clampRowLimit(n);
+    setRowLimitState(v);
+    try { localStorage.setItem(ROW_LIMIT_KEY, String(v)); } catch { /* not persisted; still applies this session */ }
+  }, []);
+  /** Interactive queries return up to the user's row limit; DDL and benchmarking do not need rows. */
+  const limits = useCallback((maxRows = rowLimitRef.current) => ({ maxRows, timeoutMs: QUERY_TIMEOUT_MS }), []);
   const sqlRef = useRef(sql);
   sqlRef.current = sql;
 
@@ -75,19 +91,20 @@ export function useLab() {
 
   const snapshot = useCallback(async (label: string, text: string, runs: number): Promise<PlanSnapshot> => {
     const samples: number[] = [];
-    const bench = { ...QUERY_LIMITS, requireReadOnly: true }; // never repeat (or even warm up) a statement that writes
+    const bench = { ...limits(0), requireReadOnly: true }; // timings read every row but do not materialize them
+     // never repeat (or even warm up) a statement that writes
     let last = await engine.execute(text, bench); // discarded warm-up; sizes the repeat count
     const repeat = repsFor(last.elapsedMs);
     for (let i = 0; i < runs; i++) { last = await engine.execute(text, { ...bench, repeat }); samples.push(last.elapsedMs); }
     let plan = null; let planError: string | undefined;
     try { plan = (await engine.explain(text)).rows; } catch (e) { planError = errMsg(e); }
     return { label, sql: text, plan, planError, timing: summarizeTimes(samples, repeat), totalRows: last.totalRows, indexes: indexNames(await engine.introspect()) };
-  }, [engine]);
+  }, [engine, limits]);
 
   const runQuery = useCallback(async (text = sqlRef.current) => {
     setBusy('query'); setQuery({ status: 'running' });
     try {
-      const result = await engine.execute(text, QUERY_LIMITS);
+      const result = await engine.execute(text, limits());
       setQuery({ status: 'ok', result });
       let plan = null; let planError: string | undefined; let planNote: string | undefined;
       if (!isExplainable(text)) planNote = 'Query plans are shown for SELECT, INSERT, UPDATE and DELETE statements, not for DDL or PRAGMA.';
@@ -98,23 +115,23 @@ export function useLab() {
     } catch (e) {
       setQuery({ status: 'error', message: errMsg(e), canceled: (e as { kind?: string }).kind === 'canceled' });
     } finally { setBusy(null); }
-  }, [engine]);
+  }, [engine, limits]);
 
   /** Benchmark → create index → benchmark again, with identical methodology for both sides. */
   const compareWithIndex = useCallback((table: string, columns: string[]) => run('index', async () => {
     const b = await snapshot('Before index', sql, benchRuns);
-    await engine.execute(buildCreateIndex(table, columns), QUERY_LIMITS);
+    await engine.execute(buildCreateIndex(table, columns), limits(0));
     const a = await snapshot(`After index on ${table}(${columns.join(', ')})`, sql, benchRuns);
     setBefore(b); setCurrent(a);
-    setQuery({ status: 'ok', result: await engine.execute(sql, QUERY_LIMITS) });
+    setQuery({ status: 'ok', result: await engine.execute(sql, limits()) });
     await refreshSchema();
-  }), [engine, sql, snapshot, benchRuns, refreshSchema, run]);
+  }), [engine, limits, sql, snapshot, benchRuns, refreshSchema, run]);
 
   const dropIndex = useCallback((name: string) => run('index', async () => {
-    await engine.execute(buildDropIndex(name), QUERY_LIMITS);
+    await engine.execute(buildDropIndex(name), limits(0));
     setBefore(null);
     await refreshSchema();
-  }), [engine, refreshSchema, run]);
+  }), [engine, limits, refreshSchema, run]);
 
   /** Loads a definition into the editors without touching the database. */
   const loadExperiment = useCallback((e: Experiment) => {
@@ -142,7 +159,7 @@ export function useLab() {
   return {
     info, schema, busy, notice, setNotice, tables, setTables, design, tableError, schemaIssues, existing,
     seedValue, setSeedValue, progress, seedMsg, sql, setSql, query, current, before,
-    benchRuns, setBenchRuns, benchmarkable: isBenchmarkable(sql),
+    benchRuns, setBenchRuns, rowLimit, setRowLimit, benchmarkable: isBenchmarkable(sql),
     createSchema, seed, runQuery, compareWithIndex, dropIndex, loadExperiment, runExperiment, toExperiment,
     runGuided: () => runExperiment(GUIDED_EXAMPLE), resetDatabase, cancel: () => engine.cancel(),
   };

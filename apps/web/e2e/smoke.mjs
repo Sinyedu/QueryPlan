@@ -207,6 +207,31 @@ try {
   await page.getByLabel('SQL editor').waitFor();
   check((await page.getByRole('region', { name: 'Schema diagram' }).count()) === 0, '"Open the Lab" returns to the workbench');
 
+  // --- User-chosen row limit and virtualized results ---
+  const series = (n) => `WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x < ${n}) SELECT x FROM c`;
+  const limitInput = page.getByLabel('Rows to show');
+  check((await limitInput.inputValue()) === '200', 'row limit defaults to 200');
+  await limitInput.fill('99999');
+  await limitInput.blur();
+  check((await limitInput.inputValue()) === '5000', 'a too-large row limit is clamped to 5,000');
+
+  await runSql(series(6000));
+  await page.getByText(/6,000 rows \(showing first 5,000\)/).waitFor({ timeout: 30_000 });
+  const domRows = await page.locator('[aria-label="Query results"] tbody tr').count();
+  check(domRows > 0 && domRows < 100, `5,000 rows are virtualized (only ${domRows} row elements in the DOM)`);
+  await page.getByRole('region', { name: 'Query results' }).evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  await page.getByRole('cell', { name: '5000', exact: true }).waitFor({ timeout: 10_000 });
+  check(true, 'scrolling to the bottom reaches row 5,000');
+  check((await page.locator('[aria-label="Query results"] tbody tr').count()) < 100, 'the DOM stays small after scrolling');
+  await page.getByText(/Raise "Show up to"/).waitFor();
+
+  await limitInput.fill('50');
+  await runSql(series(6000));
+  await page.getByText(/6,000 rows \(showing first 50\)/).waitFor({ timeout: 30_000 });
+  await page.reload();
+  check((await page.getByLabel('Rows to show').inputValue()) === '50', 'the chosen row limit is remembered after a reload');
+  await page.getByLabel('Rows to show').fill('200');
+
   await page.getByLabel('SQL editor').fill('WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT count(*) FROM c');
   await page.getByRole('button', { name: 'Run & explain' }).click();
   page.once('dialog', (d) => d.accept());
