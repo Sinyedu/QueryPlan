@@ -23,8 +23,8 @@ pnpm --filter web e2e   # optional: real-browser smoke test (needs Chrome or Edg
 1. Edit the `users` table (names, types, data generators) and **Create table**.
 2. **Seed** 100–10,000 rows (deterministic, seed 42, 500-row batches in one transaction, progress bar).
 3. Run SQL (`Ctrl/⌘+Enter`). Results are capped at 200 rendered rows; the true row count and measured elapsed time are shown.
-4. Read the plan tree (parent/child from SQLite's `id`/`parent`, raw detail strings preserved; click a step for a plain-language note).
-5. **Create index & compare** benchmarks the query (1 discarded warm-up + 5 timed runs, median), creates the index, benchmarks again and shows both plans.
+4. Read the plan as a list or SVG graph (parent/child from SQLite's `id`/`parent`, raw detail strings preserved; click a step for a plain-language note).
+5. **Create index & compare** benchmarks the query (1 discarded warm-up, then 5 samples, each the mean of many repeated executions; median reported), creates the index, benchmarks again and shows both plans.
 
 ## Architecture
 

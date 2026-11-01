@@ -54,6 +54,13 @@ describe('SQLite journey', () => {
     expect(info.indexes).toEqual([{ name: 'idx_users_email', unique: false, columns: ['email'] }]);
   });
 
+  it('repeats read-only statements for benchmarking but not writes', () => {
+    const r = s.execute('SELECT * FROM users', { ...opts, repeat: 3 });
+    expect(r.totalRows).toBe(5_000);
+    expect(() => s.execute('DELETE FROM users', { ...opts, repeat: 2 })).toThrow(/Only a single SELECT/);
+    expect(s.execute('SELECT count(*) FROM users', opts).rows[0]![0]).toBe(5_000);
+  });
+
   it('surfaces SQL errors without breaking the session', () => {
     expect(() => s.execute('SELEC 1', opts)).toThrow(SqliteCoreError);
     expect(s.execute('SELECT 1', opts).rows).toEqual([[1]]);

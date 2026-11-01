@@ -64,3 +64,33 @@ export const KIND_HELP: Record<AccessKind, string> = {
   'temp-structure': 'Builds a temporary sort/group structure, typically for ORDER BY, GROUP BY or DISTINCT.',
   other: 'See the raw SQLite detail text.',
 };
+
+export interface NodeNote {
+  /** Plain-language explanation derived from this node's own detail text. */
+  text: string;
+}
+
+/**
+ * Per-query explanation built only from what SQLite printed for this step (table, index, constraint
+ * columns). It describes the access path; it does not claim the plan is fast or slow.
+ */
+export function describeNode(node: Pick<PlanNode, 'detail' | 'kind' | 'index'>): NodeNote {
+  const table = /^(?:SCAN|SEARCH)\s+(\S+)/.exec(node.detail)?.[1];
+  const constraint = /\(([^()]*)\)\s*$/.exec(node.detail)?.[1];
+  const cols = constraint ? [...constraint.matchAll(/(\w+)\s*[=<>]/g)].map((m) => m[1]!) : [];
+  const colText = cols.length ? ` on ${[...new Set(cols)].join(', ')}` : '';
+  switch (node.kind) {
+    case 'scan':
+      return { text: `Reads every row of ${table ?? 'the table'}. If a WHERE or JOIN column is selective, an index${table ? ` on ${table}` : ''} could let SQLite skip most rows, though the planner may still choose a scan.` };
+    case 'index-search':
+      return { text: `Uses index ${node.index ?? ''} to look up matching rows in ${table ?? 'the table'}${colText}, then fetches each row from the table.` };
+    case 'rowid-search':
+      return { text: `Looks up ${table ?? 'rows'} directly by rowid / INTEGER PRIMARY KEY${colText}.` };
+    case 'covering-index':
+      return { text: `Reads only index ${node.index ?? ''}; every needed column is stored in it, so ${table ?? 'the table'} itself is not touched.` };
+    case 'temp-structure':
+      return { text: 'Builds a temporary B-tree to sort or group rows because no existing index provides that order.' };
+    default:
+      return { text: 'No specific note for this step; read the raw SQLite detail above.' };
+  }
+}

@@ -12,14 +12,18 @@
 ### Phase 0 — gaps closed
 - [x] Stop button during seeding (terminates the worker, clears the in-memory DB; confirmed in UI). The query Stop path is verified in the browser; the seed Stop uses the same client code but is not browser-tested because seeding finishes too fast to click.
 - [x] Lint (ESLint + typescript-eslint + react-hooks) via `pnpm lint`.
-- [x] CI workflow (`.github/workflows/ci.yml`): lint, typecheck, test, build, browser smoke test. Not yet observed running on GitHub.
+- [x] CI workflow (`.github/workflows/ci.yml`): lint, typecheck, test, build, browser smoke test. Ran green on GitHub for PR #2.
 - [x] Benchmark discards one warm-up run before 5 timed runs.
 - [x] Mobile: no horizontal overflow at 390px in Chrome (automated); not tested on a physical device.
 
-### Phase 0 — still open
-- [ ] Only one custom table; no foreign keys; seed value ranges/distributions are fixed per generator (Phase 1).
-- [ ] Plan tree is an indented list, not an SVG graph; plan notes are generic per access kind.
-- [ ] Timings remain coarse (browser timer resolution) and include row counting.
+### Phase 0 — stage 2
+- [x] SVG plan graph (left-to-right tree, keyboard-focusable nodes) alongside the list view, with a List/Graph toggle.
+- [x] Per-step notes derived from each step's own detail text (table, index, constraint columns); no cost or speed claims.
+- [x] Finer timings: the benchmark sizes a repeat count from its warm-up run, then each of the 5 samples is the mean of N executions (up to 200). Row iteration is deliberately included, since that is what a client pays; the UI states this.
+- [ ] Graph view was checked by an automated browser test, not reviewed visually across browsers or on a phone.
+
+### Phase 0 — handed to Phase 1
+- [ ] Only one custom table; no foreign keys; seed value ranges/distributions are fixed per generator.
 
 ## Phase 1 — Strong public beta
 - [ ] Multiple tables and foreign keys
