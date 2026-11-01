@@ -45,3 +45,7 @@ MVP: in-memory, refresh clears data. Later: opt-in OPFS where supported, with te
 - The engine contract is schema-wide: `createSchema(tables, replace)` and `seed({ tables, seed })` create and fill all tables in foreign-key dependency order inside one transaction (children deleted first, parents inserted first). Foreign keys are enforced.
 - `domain/experiment.ts` is the single trust boundary for saved, imported and shared definitions (`parseExperiment`).
 - Benchmark samples are produced inside the worker (`execute` with `repeat`, read-only SELECT/WITH only) so timer resolution matters less.
+
+## Designer
+- `domain/designer.ts` holds the pure schema operations (connect, disconnect, rename/remove with reference cascades, auto-layout); `hooks/useSchemaDesign.ts` adds selection, card positions and messages; `components/designer/` renders the canvas with plain pointer events (no graph library).
+- The Lab and Designer views are separate components over the same `useLab` state, so the diagram and form never diverge.

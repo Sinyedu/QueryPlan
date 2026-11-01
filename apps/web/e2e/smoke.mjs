@@ -155,6 +155,58 @@ try {
   await page.getByText(XSS, { exact: true }).first().waitFor();
   check((await page.evaluate(() => window.__pwn)) === undefined && (await page.locator('#root img').count()) === 0, 'an experiment named with HTML is rendered as text');
 
+  // --- Visual designer: connect tables by dragging ---
+  const drag = async (from, to, finish = true) => {
+    const a = await from.boundingBox();
+    const b = await to.boundingBox();
+    await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(b.x + 30, b.y + b.height / 2, { steps: 12 });
+    if (finish) await page.mouse.up();
+  };
+  const rels = page.getByRole('list', { name: 'Relationships' });
+  const preview = page.getByLabel('Generated SQL');
+
+  check((await page.getByRole('region', { name: 'Schema diagram' }).count()) === 0, 'the designer is not part of the lab view');
+  await page.getByRole('tab', { name: 'Designer', exact: true }).click();
+  await page.getByRole('region', { name: 'Schema diagram' }).waitFor();
+  await page.getByRole('button', { name: '+ Table', exact: true }).click();
+  const solo = await page.getByRole('group', { name: /^Table / }).count();
+  await drag(page.getByRole('button', { name: /Connect table2\.label/ }), page.locator('[data-table="t"][data-col="id"]'));
+  await rels.getByText(/table2\.label/).waitFor();
+  check((await preview.textContent()).includes('REFERENCES "t" ("id")'), `dragging a column onto a primary key creates a foreign key (${solo} tables on canvas)`);
+
+  await page.getByRole('tab', { name: 'Lab', exact: true }).click();
+  await page.getByRole('tab', { name: 'Designer', exact: true }).click();
+  await rels.getByText(/table2\.label/).waitFor();
+  check(true, 'switching between Lab and Designer keeps the diagram state');
+
+  await page.getByRole('tab', { name: 't', exact: true }).click();
+  await page.getByLabel('Table name').fill('parent');
+  await rels.getByText(/table2\.label.*parent\.id/).waitFor();
+  check((await preview.textContent()).includes('REFERENCES "parent" ("id")'), 'renaming a parent table updates the foreign keys that point at it');
+
+  await page.getByRole('button', { name: '+ Column' }).click();
+  await drag(page.getByRole('button', { name: /Connect parent\.col2/ }), page.locator('[data-table="table2"][data-col="id"]'));
+  await page.getByText(/would create a cycle/).waitFor();
+  check((await rels.locator('li').count()) === 1, 'a connection that would form a cycle is refused with an explanation');
+
+  const card = page.getByRole('group', { name: 'Table table2' });
+  const before = await card.boundingBox();
+  await drag(card.getByText('table2', { exact: true }), card.getByText('table2', { exact: true }), false);
+  const head = await card.getByText('table2', { exact: true }).boundingBox();
+  await page.mouse.move(head.x + head.width / 2 + 70, head.y + head.height / 2 + 40, { steps: 8 });
+  await page.mouse.up();
+  const after = await card.boundingBox();
+  check(Math.abs(after.x - before.x) > 30 || Math.abs(after.y - before.y) > 20, 'table cards can be dragged to a new position');
+
+  await page.getByRole('button', { name: /Remove relationship table2\.label/ }).click();
+  await page.getByText(/None yet/).waitFor();
+  check(!(await preview.textContent()).includes('REFERENCES'), 'removing a relationship from the diagram removes the foreign key');
+  await page.getByRole('button', { name: /Open the Lab/ }).click();
+  await page.getByLabel('SQL editor').waitFor();
+  check((await page.getByRole('region', { name: 'Schema diagram' }).count()) === 0, '"Open the Lab" returns to the workbench');
+
   await page.getByLabel('SQL editor').fill('WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT count(*) FROM c');
   await page.getByRole('button', { name: 'Run & explain' }).click();
   page.once('dialog', (d) => d.accept());
