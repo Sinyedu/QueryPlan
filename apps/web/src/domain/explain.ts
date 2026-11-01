@@ -31,21 +31,41 @@ export function classifyDetail(detail: string): Pick<PlanNode, 'kind' | 'index'>
   return { kind: 'other' };
 }
 
-/** Build a forest using parent ids. Rows whose parent is missing become roots. */
+/**
+ * Build a forest using parent ids. Rows whose parent is missing become roots. Duplicate ids are ignored and a
+ * link that would create a cycle is treated as a root, so malformed input can never loop or hide steps.
+ */
 export function parsePlan(rows: readonly RawPlanRow[]): PlanNode[] {
   const nodes = new Map<number, PlanNode>();
-  for (const r of rows) nodes.set(r.id, { id: r.id, parent: r.parent, detail: r.detail, children: [], ...classifyDetail(r.detail) });
-  const roots: PlanNode[] = [];
+  const order: PlanNode[] = [];
   for (const r of rows) {
-    const node = nodes.get(r.id)!;
-    const parent = r.parent !== r.id ? nodes.get(r.parent) : undefined;
-    (parent ? parent.children : roots).push(node);
+    if (nodes.has(r.id)) continue;
+    const node: PlanNode = { id: r.id, parent: r.parent, detail: r.detail, children: [], ...classifyDetail(r.detail) };
+    nodes.set(r.id, node);
+    order.push(node);
+  }
+  const attachedTo = new Map<PlanNode, PlanNode>();
+  const roots: PlanNode[] = [];
+  for (const node of order) {
+    const parent = node.parent !== node.id ? nodes.get(node.parent) : undefined;
+    let cycle = false;
+    for (let up: PlanNode | undefined = parent; up; up = attachedTo.get(up)) {
+      if (up === node) { cycle = true; break; }
+    }
+    if (parent && !cycle) { parent.children.push(node); attachedTo.set(node, parent); } else roots.push(node);
   }
   return roots;
 }
 
+/** Pre-order flatten without recursion, so very deep input cannot overflow the stack. */
 export function flattenPlan(roots: readonly PlanNode[], depth = 0): { node: PlanNode; depth: number }[] {
-  return roots.flatMap((n) => [{ node: n, depth }, ...flattenPlan(n.children, depth + 1)]);
+  const out: { node: PlanNode; depth: number }[] = [];
+  const stack = [...roots].reverse().map((node) => ({ node, depth }));
+  for (let item = stack.pop(); item; item = stack.pop()) {
+    out.push(item);
+    for (let i = item.node.children.length - 1; i >= 0; i--) stack.push({ node: item.node.children[i]!, depth: item.depth + 1 });
+  }
+  return out;
 }
 
 export function planSummary(rows: readonly RawPlanRow[]): string {
@@ -75,6 +95,14 @@ export interface NodeNote {
  * columns). It describes the access path; it does not claim the plan is fast or slow.
  */
 export function describeNode(node: Pick<PlanNode, 'detail' | 'kind' | 'index'>): NodeNote {
+  if (/AUTOMATIC (COVERING )?INDEX/.test(node.detail)) {
+    return { text: 'SQLite builds a temporary index while running this query because none exists. That cost is paid on every run; a permanent index on the same columns would avoid it.' };
+  }
+  if (/^CORRELATED (SCALAR )?SUBQUERY/.test(node.detail)) return { text: 'A subquery that depends on the outer row, so it may run once per outer row.' };
+  if (/^(SCALAR|LIST) SUBQUERY/.test(node.detail)) return { text: 'A subquery evaluated on its own; SQLite typically runs it once and reuses the result.' };
+  if (/^(CO-ROUTINE|MATERIALIZE)/.test(node.detail)) return { text: 'SQLite computes this subquery or view as a separate step and feeds its rows to the outer query.' };
+  if (/^MULTI-INDEX OR/.test(node.detail)) return { text: 'An OR condition answered by combining several index lookups.' };
+  if (/^(COMPOUND QUERY|UNION|MERGE)/.test(node.detail)) return { text: 'Combines the results of several SELECTs (UNION / INTERSECT / EXCEPT).' };
   const table = /^(?:SCAN|SEARCH)\s+(\S+)/.exec(node.detail)?.[1];
   const constraint = /\(([^()]*)\)\s*$/.exec(node.detail)?.[1];
   const cols = constraint ? [...constraint.matchAll(/(\w+)\s*[=<>]/g)].map((m) => m[1]!) : [];
@@ -93,4 +121,35 @@ export function describeNode(node: Pick<PlanNode, 'detail' | 'kind' | 'index'>):
     default:
       return { text: 'No specific note for this step; read the raw SQLite detail above.' };
   }
+}
+
+/**
+ * Plan-level reading hints derived only from the plan rows (no statistics, no costs).
+ * Top-level steps of a join form nested loops: the first is the outer loop, later ones run once per outer row.
+ */
+export function planInsights(rows: readonly RawPlanRow[]): string[] {
+  const roots = parsePlan(rows);
+  const flat = flattenPlan(roots);
+  const out: string[] = [];
+  const loops = roots.filter((r) => /^(SCAN|SEARCH)\b/.test(r.detail));
+  if (loops.length > 1) {
+    out.push(`Join: ${loops.length} tables are read as nested loops, in the order listed. Each later step runs once for every row the earlier steps produce.`);
+    const innerScan = loops.slice(1).find((n) => n.kind === 'scan');
+    if (innerScan) out.push(`"${innerScan.detail}" is a full scan inside a loop, so it repeats for each outer row. This is where an index on the join column usually helps (the planner may still choose otherwise).`);
+  }
+  if (flat.some((f) => /AUTOMATIC (COVERING )?INDEX/.test(f.node.detail))) {
+    out.push('An automatic (temporary) index is built on every run; consider creating a permanent index on those columns.');
+  }
+  if (flat.some((f) => f.node.kind === 'temp-structure')) {
+    out.push('A temporary sort/group structure is used; an index matching the ORDER BY / GROUP BY columns can sometimes remove it.');
+  }
+  return out;
+}
+
+/**
+ * EXPLAIN QUERY PLAN is only meaningful for statements that read or write rows. Running it after DDL such as
+ * CREATE TABLE would re-compile the statement against the *changed* schema and report a bogus error.
+ */
+export function isExplainable(sql: string): boolean {
+  return /^\s*(select|with|insert|update|delete|replace|values)\b/i.test(sql);
 }

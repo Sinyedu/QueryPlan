@@ -20,8 +20,8 @@ pnpm --filter web e2e   # optional: real-browser smoke test (needs Chrome or Edg
 
 ## The journey (or press "▶ Guided example")
 
-1. Edit the `users` table (names, types, data generators) and **Create table**.
-2. **Seed** 100–10,000 rows (deterministic, seed 42, 500-row batches in one transaction, progress bar).
+1. Edit the schema: up to 6 tables, typed columns, data generators, optional foreign keys to another table's sequence-filled integer primary key. **Create tables** (parents first).
+2. **Seed all tables**: 100–10,000 rows each (30,000 total), deterministic for a chosen seed, optional `skewed` distributions, 500-row batches in one transaction, progress bar.
 3. Run SQL (`Ctrl/⌘+Enter`). Results are capped at 200 rendered rows; the true row count and measured elapsed time are shown.
 4. Read the plan as a list or SVG graph (parent/child from SQLite's `id`/`parent`, raw detail strings preserved; click a step for a plain-language note).
 5. **Create index & compare** benchmarks the query (1 discarded warm-up, then 5 samples, each the mean of many repeated executions; median reported), creates the index, benchmarks again and shows both plans.
@@ -31,7 +31,7 @@ pnpm --filter web e2e   # optional: real-browser smoke test (needs Chrome or Edg
 ```
 React UI ─ hooks/useLab ─ db/sqlite-client (DatabaseEngine) ──postMessage──▶ db/sqlite-worker
                                                                               └─ db/sqlite-core ─ SQLite WASM (:memory:)
-domain/  schema (identifier validation/quoting, DDL) · seeding (PRNG + generators) · explain (plan parser) · benchmark
+domain/  schema (identifiers, foreign keys, DDL) · seeding (PRNG, generators, distributions) · explain (plan parser, notes) · benchmark · experiment (validated import/export) · examples
 ```
 
 - `apps/web/src/db/engine.ts` — the `DatabaseEngine` interface. SQLite is the only adapter; a future PostgreSQL adapter would implement the same contract against a remote sandbox. Plan payloads are engine-specific and are never compared across engines.
@@ -44,9 +44,12 @@ domain/  schema (identifier validation/quoting, DDL) · seeding (PRNG + generato
 - **Plans vary** with SQLite version, statistics, indexes and data. An index is never guaranteed to be chosen.
 - `INTEGER PRIMARY KEY` is the rowid alias, so lookups by it show `SEARCH … USING INTEGER PRIMARY KEY` without any extra index.
 - SQLite is dynamically typed; column types are affinities, not enforced types.
-- Seeding **replaces** the table's rows (`DELETE` + inserts in one transaction, rolled back on failure).
+- Seeding **replaces** all listed tables' rows (children deleted first, parents inserted first, one transaction, rolled back on failure). `PRAGMA foreign_keys = ON`, so declared foreign keys are enforced.
+- A `skewed` distribution makes a few values very common, which changes how selective an index is, so the same index can help very different amounts.
 
 ## Safety, resource limits and worker limitations
+
+Full threat model, controls and test map: [`docs/SECURITY.md`](docs/SECURITY.md).
 
 - Identifiers are validated (`[A-Za-z_][A-Za-z0-9_]*`, ≤ 64 chars, no `sqlite_` prefix) **and** quoted; generated values are bound as parameters. Query text you type is executed as-is (it only touches your own in-memory database).
 - Results: ≤ 200 rows rendered, cells ≤ 2,000 chars; extra rows are counted but not materialized. Seeding is capped at 10,000 rows, ≤ 12 columns, database memory ≤ 64 MiB.
@@ -64,3 +67,18 @@ PostgreSQL would run only in ephemeral, isolated server-side sandboxes with quot
 ## License
 
 MIT
+
+## Experiments: save, export, share
+
+An experiment is a definition (schema, row counts, seed, SQL) with **no row data**; data is regenerated from the seed.
+
+- **Save** stores it in this browser's `localStorage`. The database itself is not persisted.
+- **Export / Import** use a JSON file. **Copy share link** puts the definition in the URL fragment (`#exp=…`); fragments are not sent to servers.
+- Imports and links are treated as untrusted: size limits, strict field and enum checks, identifier validation, unknown fields dropped. Loading only fills the editors; nothing runs until you press the buttons. The SQL in an experiment is arbitrary SQL for your own in-memory database, so read it before running.
+
+## Hardening summary
+
+SQL you type runs only against your own in-memory database, and the app blocks the ways that could hurt the tab or surprise you:
+`ATTACH`/`DETACH` and PRAGMAs that lift the memory budget are denied, single values are capped at 5 MB, `EXPLAIN` can never run a second
+smuggled statement, and benchmarks refuse anything that is not a single genuinely read-only statement (even a `WITH … DELETE`).
+Imported experiments and share links are validated as untrusted input.

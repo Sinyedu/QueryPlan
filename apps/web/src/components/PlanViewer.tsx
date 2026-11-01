@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { KIND_HELP, describeNode, flattenPlan, parsePlan, planSummary } from '../domain/explain';
+import { KIND_HELP, describeNode, flattenPlan, parsePlan, planInsights, planSummary } from '../domain/explain';
 import { formatMs } from '../domain/benchmark';
 import type { PlanSnapshot } from '../hooks/types';
 import { PlanGraph } from './PlanGraph';
@@ -13,6 +13,7 @@ export function PlanTree({ snap }: { snap: PlanSnapshot }) {
   const [selected, setSelected] = useState<number | null>(null);
   const [view, setView] = useState<View>('list');
   if (snap.planError) return <Alert tone="error">{snap.planError}</Alert>;
+  if (snap.planNote) return <p className="text-sm text-zinc-400">{snap.planNote}</p>;
   if (!snap.plan || snap.plan.length === 0) return <p className="text-sm text-zinc-500">SQLite returned no plan rows for this statement.</p>;
 
   const roots = parsePlan(snap.plan);
@@ -31,6 +32,12 @@ export function PlanTree({ snap }: { snap: PlanSnapshot }) {
           ))}
         </div>
       </div>
+
+      {planInsights(snap.plan).length > 0 && (
+        <ul className="mb-2 space-y-1 rounded border border-sky-900 bg-sky-950/30 p-2 text-xs text-sky-100" aria-label="Reading this plan">
+          {planInsights(snap.plan).map((t, i) => <li key={i}>{t}</li>)}
+        </ul>
+      )}
 
       {view === 'graph' ? <PlanGraph roots={roots} selected={selected} onSelect={toggle} /> : (
         <ul role="tree" aria-label={snap.label} className="space-y-1">

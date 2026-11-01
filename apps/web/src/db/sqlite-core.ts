@@ -3,9 +3,9 @@
  * Uses an in-memory database; nothing persists across reloads or worker restarts.
  */
 import type { Database, Sqlite3Static } from '@sqlite.org/sqlite-wasm';
-import { buildCreateTable, buildInsert, quoteIdentifier, validateTable } from '../domain/schema';
+import { buildCreateTable, buildInsert, orderTables, quoteExistingName, quoteIdentifier, validateSchema, type TableDef } from '../domain/schema';
 import { isBenchmarkable } from '../domain/benchmark';
-import { generateBatches, clampRowCount } from '../domain/seeding';
+import { MAX_TOTAL_ROWS, clampedCounts, generateBatches, tableSeed } from '../domain/seeding';
 import type { RawPlanRow } from '../domain/explain';
 import type {
   Cell, EngineInfo, ExecuteOptions, ExecuteResult, ExplainResult, SchemaInfo, SeedRequest, SeedResult, TableInfo,
@@ -15,6 +15,14 @@ const MAX_CELL_CHARS = 2_000;
 /** Memory budget: 16384 pages * 4 KiB = 64 MiB of database. */
 const MAX_PAGES = 16_384;
 const PROGRESS_OPS = 2_000;
+/** Largest single value (string/blob) and SQL text SQLite will accept; far below the library defaults of ~1 GB. */
+const MAX_VALUE_BYTES = 5_000_000;
+const MAX_SQL_BYTES = 500_000;
+/** PRAGMAs that could lift the memory budget or break schema invariants; denied for user SQL. */
+const DENIED_PRAGMAS = new Set([
+  'max_page_count', 'page_size', 'writable_schema', 'schema_version', 'soft_heap_limit', 'hard_heap_limit',
+  'mmap_size', 'temp_store_directory', 'data_store_directory',
+]);
 
 export class SqliteCoreError extends Error {
   constructor(message: string, readonly kind: 'sql' | 'validation' | 'timeout', readonly code?: number) {
@@ -39,6 +47,8 @@ export class SqliteSession {
   constructor(private readonly sqlite3: Sqlite3Static) {
     this.db = new sqlite3.oo1.DB(':memory:', 'c');
     this.db.exec(`PRAGMA max_page_count = ${MAX_PAGES}`);
+    this.db.exec('PRAGMA foreign_keys = ON'); // declared foreign keys are really enforced
+    this.lockDown(sqlite3);
     // Cooperative time budget: returning non-zero makes SQLite abort the running statement.
     sqlite3.capi.sqlite3_progress_handler(
       this.db.pointer!,
@@ -52,6 +62,40 @@ export class SqliteSession {
       },
       0,
     );
+  }
+
+  /**
+   * Applied after our own setup PRAGMAs, so it constrains user SQL only: lower value/SQL size limits, no ATTACH
+   * (a second database would sit outside the page budget), and no PRAGMA that lifts the budget.
+   */
+  private lockDown(sqlite3: Sqlite3Static): void {
+    const { capi } = sqlite3;
+    const ptr = this.db.pointer!;
+    capi.sqlite3_limit(ptr, capi.SQLITE_LIMIT_LENGTH, MAX_VALUE_BYTES);
+    capi.sqlite3_limit(ptr, capi.SQLITE_LIMIT_SQL_LENGTH, MAX_SQL_BYTES);
+    capi.sqlite3_limit(ptr, capi.SQLITE_LIMIT_ATTACHED, 0);
+    capi.sqlite3_set_authorizer(
+      ptr,
+      (_arg, action, arg1) => {
+        if (action === capi.SQLITE_ATTACH || action === capi.SQLITE_DETACH) return capi.SQLITE_DENY;
+        if (action === capi.SQLITE_PRAGMA && typeof arg1 === 'string' && DENIED_PRAGMAS.has(arg1.toLowerCase())) return capi.SQLITE_DENY;
+        return capi.SQLITE_OK;
+      },
+      0,
+    );
+  }
+
+  /** Benchmarks repeat a statement, so it must be one statement and genuinely read-only (a WITH can front a DELETE). */
+  private assertSingleReadOnly(sql: string): void {
+    if (!isBenchmarkable(sql)) throw new SqliteCoreError('Only a single SELECT/WITH statement can be repeated.', 'validation');
+    const stmt = this.guarded(5_000, () => this.db.prepare(sql));
+    try {
+      if (!this.sqlite3.capi.sqlite3_stmt_readonly(stmt.pointer!)) {
+        throw new SqliteCoreError('Only read-only statements can be benchmarked; this one modifies the database.', 'validation');
+      }
+    } finally {
+      stmt.finalize();
+    }
   }
 
   info(): EngineInfo {
@@ -76,9 +120,9 @@ export class SqliteSession {
     }
   }
 
-  execute(sql: string, { maxRows, timeoutMs, repeat = 1 }: ExecuteOptions): ExecuteResult {
+  execute(sql: string, { maxRows, timeoutMs, repeat = 1, requireReadOnly = false }: ExecuteOptions): ExecuteResult {
     if (sql.trim() === '') throw new SqliteCoreError('Enter a SQL statement to run.', 'validation');
-    if (repeat > 1 && !isBenchmarkable(sql)) throw new SqliteCoreError('Only a single SELECT/WITH statement can be repeated.', 'validation');
+    if (repeat > 1 || requireReadOnly) this.assertSingleReadOnly(sql);
     const columns: string[] = [];
     const rows: Cell[][] = [];
     let totalRows = 0;
@@ -109,47 +153,78 @@ export class SqliteSession {
     const stmt = sql.trim().replace(/;+\s*$/, '');
     if (stmt === '') throw new SqliteCoreError('Enter a SQL statement to explain.', 'validation');
     if (/^explain\b/i.test(stmt)) throw new SqliteCoreError('Remove EXPLAIN from the query; QueryPlan adds it for you.', 'validation');
-    const rows = this.guarded(timeoutMs, () =>
-      this.db.exec({ sql: `EXPLAIN QUERY PLAN ${stmt}`, rowMode: 'object', returnValue: 'resultRows' }),
-    ) as unknown as RawPlanRow[];
+    // prepare() compiles only the first statement, so anything smuggled after a ';' is never executed.
+    const rows = this.guarded(timeoutMs, () => {
+      const st = this.db.prepare(`EXPLAIN QUERY PLAN ${stmt}`);
+      try {
+        const out: RawPlanRow[] = [];
+        while (st.step()) out.push(st.get({}) as unknown as RawPlanRow);
+        return out;
+      } finally {
+        st.finalize();
+      }
+    });
     return { rows: rows.map((r) => ({ id: Number(r.id), parent: Number(r.parent), notused: Number(r.notused), detail: String(r.detail) })) };
   }
 
-  createTable(table: Parameters<typeof buildCreateTable>[0], replace: boolean): void {
-    const issues = validateTable(table);
+  private checkedOrder(tables: readonly TableDef[]): TableDef[] {
+    const issues = validateSchema(tables);
     if (issues.length) throw new SqliteCoreError(issues[0]!.message, 'validation');
+    return orderTables(tables)!;
+  }
+
+  createSchema(tables: TableDef[], replace: boolean): void {
+    const ordered = this.checkedOrder(tables);
     this.guarded(5_000, () => {
-      if (replace) this.db.exec(`DROP TABLE IF EXISTS ${quoteIdentifier(table.name)}`);
-      this.db.exec(buildCreateTable(table));
+      if (replace) {
+        // Dropping a parent while children still hold rows would trip enforcement, so drop children first with FKs off.
+        this.db.exec('PRAGMA foreign_keys = OFF');
+        try {
+          for (const t of [...ordered].reverse()) this.db.exec(`DROP TABLE IF EXISTS ${quoteIdentifier(t.name)}`);
+        } finally {
+          this.db.exec('PRAGMA foreign_keys = ON');
+        }
+      }
+      for (const t of ordered) this.db.exec(buildCreateTable(t));
     });
   }
 
-  /** Replaces the table's rows with deterministic synthetic rows, inserted in batches inside one transaction. */
-  seed({ table, rowCount, seed }: SeedRequest, onProgress: (done: number, total: number) => void): SeedResult {
-    const issues = validateTable(table);
-    if (issues.length) throw new SqliteCoreError(issues[0]!.message, 'validation');
-    const total = clampRowCount(rowCount);
+  /**
+   * Replaces the rows of every listed table with deterministic synthetic rows, inserted in batches inside ONE
+   * transaction: children are emptied first, parents are filled first, so enforced foreign keys always hold.
+   */
+  seed({ tables, seed }: SeedRequest, onProgress: (done: number, total: number) => void): SeedResult {
+    const ordered = this.checkedOrder(tables.map((t) => t.table));
+    const counts = clampedCounts(tables);
+    const total = Object.values(counts).reduce((x, y) => x + y, 0);
+    if (total > MAX_TOTAL_ROWS) {
+      throw new SqliteCoreError(`At most ${MAX_TOTAL_ROWS.toLocaleString()} rows across all tables (requested ${total.toLocaleString()}).`, 'validation');
+    }
     const start = performance.now();
     this.guarded(60_000, () => {
-      const stmt = this.db.prepare(buildInsert(table));
       this.db.exec('BEGIN');
       try {
-        this.db.exec(`DELETE FROM ${quoteIdentifier(table.name)}`);
+        for (const t of [...ordered].reverse()) this.db.exec(`DELETE FROM ${quoteIdentifier(t.name)}`);
         let done = 0;
-        for (const batch of generateBatches(table, total, seed)) {
-          for (const row of batch) stmt.bind(row).stepReset();
-          done += batch.length;
-          onProgress(done, total);
+        for (const t of ordered) {
+          const stmt = this.db.prepare(buildInsert(t));
+          try {
+            for (const batch of generateBatches(t, counts[t.name]!, tableSeed(seed, t.name), counts)) {
+              for (const row of batch) stmt.bind(row).stepReset();
+              done += batch.length;
+              onProgress(done, total);
+            }
+          } finally {
+            stmt.finalize();
+          }
         }
         this.db.exec('COMMIT');
       } catch (e) {
         this.db.exec('ROLLBACK');
         throw e;
-      } finally {
-        stmt.finalize();
       }
     });
-    return { rowsInserted: total, elapsedMs: performance.now() - start };
+    return { rowsInserted: total, perTable: counts, elapsedMs: performance.now() - start };
   }
 
   introspect(): SchemaInfo {
@@ -157,11 +232,13 @@ export class SqliteSession {
       "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
     ) as string[];
     const tables: TableInfo[] = names.map((name) => {
-      const q = quoteIdentifier(name);
+      const q = quoteExistingName(name); // names come from sqlite_schema and may be anything user SQL created
       const cols = this.db.exec({ sql: `PRAGMA table_info(${q})`, rowMode: 'object', returnValue: 'resultRows' }) as unknown as Record<string, unknown>[];
       const idx = this.db.exec({ sql: `PRAGMA index_list(${q})`, rowMode: 'object', returnValue: 'resultRows' }) as unknown as Record<string, unknown>[];
+      const fks = this.db.exec({ sql: `PRAGMA foreign_key_list(${q})`, rowMode: 'object', returnValue: 'resultRows' }) as unknown as Record<string, unknown>[];
       return {
         name,
+        foreignKeys: fks.map((f) => ({ from: String(f.from), table: String(f.table), to: String(f.to) })),
         columns: cols.map((c) => ({ name: String(c.name), type: String(c.type), primaryKey: Number(c.pk) > 0 })),
         rowCount: Number(this.db.selectValue(`SELECT count(*) FROM ${q}`)),
         indexes: idx

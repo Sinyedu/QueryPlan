@@ -10,12 +10,14 @@ export interface TimingSummary {
 }
 
 export const BENCH_RUNS = 5;
+export const BENCH_RUN_OPTIONS = [3, 5, 10, 20] as const;
 
 /** Target total time per sample; fast queries are repeated so the timer's ~0.1 ms resolution matters less. */
 export const TARGET_SAMPLE_MS = 10;
 export const MAX_REPS = 200;
 
 export function repsFor(warmupMs: number): number {
+  if (!Number.isFinite(warmupMs)) return 1; // unknown or absurd warm-up: do not repeat
   return Math.min(MAX_REPS, Math.max(1, Math.ceil(TARGET_SAMPLE_MS / Math.max(warmupMs, 0.01))));
 }
 

@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SqliteClient } from '../db/sqlite-client';
 import type { EngineInfo, SchemaInfo } from '../db/protocol';
-import { DEFAULT_TABLE, buildCreateIndex, buildDropIndex, indexName, type TableDef } from '../domain/schema';
-import { DEFAULT_SEED, generateRow } from '../domain/seeding';
+import { DEFAULT_TABLE, buildCreateIndex, buildDropIndex, validateSchema } from '../domain/schema';
+import { isExplainable } from '../domain/explain';
+import { DEFAULT_SEED, type SeedTable } from '../domain/seeding';
 import { BENCH_RUNS, isBenchmarkable, repsFor, summarizeTimes } from '../domain/benchmark';
+import { EXPERIMENT_VERSION, type Experiment } from '../domain/experiment';
+import { GUIDED_EXAMPLE } from '../domain/examples';
 import { QUERY_LIMITS, type Busy, type PlanSnapshot, type QueryState, type SeedProgress } from './types';
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const indexNames = (s: SchemaInfo) => s.tables.flatMap((t) => t.indexes.map((i) => i.name));
 
 export function useLab() {
   const engine = useMemo(() => new SqliteClient(), []);
@@ -15,14 +19,15 @@ export function useLab() {
   const [busy, setBusy] = useState<Busy>('init');
   const [notice, setNotice] = useState<string | null>(null);
   const [tableError, setTableError] = useState<string | null>(null);
-  const [table, setTable] = useState<TableDef>(DEFAULT_TABLE);
-  const [rowCount, setRowCount] = useState(5_000);
+  const [tables, setTables] = useState<SeedTable[]>([{ table: DEFAULT_TABLE, rowCount: 5_000 }]);
+  const [seedValue, setSeedValue] = useState(DEFAULT_SEED);
   const [progress, setProgress] = useState<SeedProgress | null>(null);
   const [seedMsg, setSeedMsg] = useState<string | null>(null);
   const [sql, setSql] = useState('SELECT * FROM users LIMIT 20');
   const [query, setQuery] = useState<QueryState>({ status: 'idle' });
   const [current, setCurrent] = useState<PlanSnapshot | null>(null);
   const [before, setBefore] = useState<PlanSnapshot | null>(null);
+  const [benchRuns, setBenchRuns] = useState<number>(BENCH_RUNS);
   const sqlRef = useRef(sql);
   sqlRef.current = sql;
 
@@ -32,12 +37,7 @@ export function useLab() {
 
   useEffect(() => {
     engine.onRestart = (reason) => {
-      setNotice(reason);
-      setSchema({ tables: [] });
-      setBefore(null);
-      setCurrent(null);
-      setProgress(null);
-      setBusy(null);
+      setNotice(reason); setSchema({ tables: [] }); setBefore(null); setCurrent(null); setProgress(null); setBusy(null);
     };
     engine.initialize().then(setInfo).then(refreshSchema).catch((e) => setNotice(errMsg(e))).finally(() => setBusy(null));
     return () => engine.dispose();
@@ -49,64 +49,63 @@ export function useLab() {
     try { await fn(); } catch (e) { (onError ?? setNotice)(errMsg(e)); } finally { setBusy(null); }
   }, []);
 
-  const createTable = useCallback((replace: boolean) => run('table', async () => {
-    setTableError(null);
-    setBefore(null); setCurrent(null);
-    await engine.createTable(table, replace);
-    await refreshSchema();
-  }, setTableError), [engine, table, refreshSchema, run]);
+  const defs = useMemo(() => tables.map((t) => t.table), [tables]);
+  const schemaIssues = useMemo(() => validateSchema(defs), [defs]);
+  const existing = schema.tables.some((t) => defs.some((d) => d.name === t.name));
 
-  const seed = useCallback(() => run('seed', async () => {
-    setSeedMsg(null); setProgress({ done: 0, total: rowCount });
-    const r = await engine.seed({ table, rowCount, seed: DEFAULT_SEED }, (done, total) => setProgress({ done, total }));
-    setSeedMsg(`Inserted ${r.rowsInserted.toLocaleString()} rows in ${Math.round(r.elapsedMs)} ms (measured).`);
+  const doSeed = useCallback(async (list: SeedTable[], seed: number) => {
+    setSeedMsg(null); setProgress({ done: 0, total: list.reduce((n, t) => n + t.rowCount, 0) });
+    try {
+      const r = await engine.seed({ tables: list, seed }, (done, total) => setProgress({ done, total }));
+      setSeedMsg(`Inserted ${r.rowsInserted.toLocaleString()} rows in ${Math.round(r.elapsedMs)} ms (measured), seed ${seed}.`);
+    } catch (e) { setSeedMsg(`Seed failed: ${errMsg(e)}`); throw e; } finally { setProgress(null); }
     await refreshSchema();
-  }, (m) => setSeedMsg(`Seed failed: ${m}`)).finally(() => setProgress(null)), [engine, table, rowCount, refreshSchema, run]);
+  }, [engine, refreshSchema]);
 
-  /** One discarded warm-up run sizes the repeat count; then `runs` samples, each the mean of `reps` executions. */
-  const bench = useCallback(async (text: string, runs: number) => {
-    const samples: number[] = [];
-    let last = await engine.execute(text, QUERY_LIMITS);
-    const repeat = repsFor(last.elapsedMs);
-    for (let i = 0; i < runs; i++) { last = await engine.execute(text, { ...QUERY_LIMITS, repeat }); samples.push(last.elapsedMs); }
-    return { last, timing: summarizeTimes(samples, repeat) };
-  }, [engine]);
+  const createSchema = useCallback(() => run('table', async () => {
+    setTableError(null); setBefore(null); setCurrent(null);
+    await engine.createSchema(defs, existing);
+    await refreshSchema();
+  }, setTableError), [run, engine, defs, existing, refreshSchema]);
+
+  const seed = useCallback(() => run('seed', () => doSeed(tables, seedValue).catch(() => undefined)), [run, doSeed, tables, seedValue]);
 
   const snapshot = useCallback(async (label: string, text: string, runs: number): Promise<PlanSnapshot> => {
-    const { last, timing } = await bench(text, runs);
+    const samples: number[] = [];
+    const bench = { ...QUERY_LIMITS, requireReadOnly: true }; // never repeat (or even warm up) a statement that writes
+    let last = await engine.execute(text, bench); // discarded warm-up; sizes the repeat count
+    const repeat = repsFor(last.elapsedMs);
+    for (let i = 0; i < runs; i++) { last = await engine.execute(text, { ...bench, repeat }); samples.push(last.elapsedMs); }
     let plan = null; let planError: string | undefined;
     try { plan = (await engine.explain(text)).rows; } catch (e) { planError = errMsg(e); }
-    const tables = (await engine.introspect()).tables;
-    const indexes = tables.flatMap((t) => t.indexes.map((i) => i.name));
-    return { label, sql: text, plan, planError, timing, totalRows: last.totalRows, indexes };
-  }, [bench, engine]);
+    return { label, sql: text, plan, planError, timing: summarizeTimes(samples, repeat), totalRows: last.totalRows, indexes: indexNames(await engine.introspect()) };
+  }, [engine]);
 
   const runQuery = useCallback(async (text = sqlRef.current) => {
     setBusy('query'); setQuery({ status: 'running' });
     try {
       const result = await engine.execute(text, QUERY_LIMITS);
       setQuery({ status: 'ok', result });
-      let plan = null; let planError: string | undefined;
-      try { plan = (await engine.explain(text)).rows; } catch (e) { planError = errMsg(e); }
-      const indexes = (await engine.introspect()).tables.flatMap((t) => t.indexes.map((i) => i.name));
-      setCurrent({ label: 'Latest run', sql: text, plan, planError, timing: summarizeTimes([result.elapsedMs]), totalRows: result.totalRows, indexes });
-      setSchema(await engine.introspect());
+      let plan = null; let planError: string | undefined; let planNote: string | undefined;
+      if (!isExplainable(text)) planNote = 'Query plans are shown for SELECT, INSERT, UPDATE and DELETE statements, not for DDL or PRAGMA.';
+      else try { plan = (await engine.explain(text)).rows; } catch (e) { planError = errMsg(e); }
+      const fresh = await engine.introspect();
+      setSchema(fresh);
+      setCurrent({ label: 'Latest run', sql: text, plan, planError, planNote, timing: summarizeTimes([result.elapsedMs]), totalRows: result.totalRows, indexes: indexNames(fresh) });
     } catch (e) {
-      const m = errMsg(e);
-      setQuery({ status: 'error', message: m, canceled: (e as { kind?: string }).kind === 'canceled' });
+      setQuery({ status: 'error', message: errMsg(e), canceled: (e as { kind?: string }).kind === 'canceled' });
     } finally { setBusy(null); }
   }, [engine]);
 
   /** Benchmark → create index → benchmark again, with identical methodology for both sides. */
-  const compareWithIndex = useCallback((column: string) => run('index', async () => {
-    const t = table.name;
-    const b = await snapshot('Before index', sql, BENCH_RUNS);
-    await engine.execute(buildCreateIndex(t, column), QUERY_LIMITS);
-    const a = await snapshot(`After index on ${column}`, sql, BENCH_RUNS);
+  const compareWithIndex = useCallback((table: string, columns: string[]) => run('index', async () => {
+    const b = await snapshot('Before index', sql, benchRuns);
+    await engine.execute(buildCreateIndex(table, columns), QUERY_LIMITS);
+    const a = await snapshot(`After index on ${table}(${columns.join(', ')})`, sql, benchRuns);
     setBefore(b); setCurrent(a);
     setQuery({ status: 'ok', result: await engine.execute(sql, QUERY_LIMITS) });
     await refreshSchema();
-  }), [engine, table.name, sql, snapshot, refreshSchema, run]);
+  }), [engine, sql, snapshot, benchRuns, refreshSchema, run]);
 
   const dropIndex = useCallback((name: string) => run('index', async () => {
     await engine.execute(buildDropIndex(name), QUERY_LIMITS);
@@ -114,21 +113,20 @@ export function useLab() {
     await refreshSchema();
   }), [engine, refreshSchema, run]);
 
-  /** Guided example: users table → 5,000 rows → email lookup (scan plan) ready for the index step. */
-  const runGuided = useCallback(() => run('table', async () => {
-    setNotice(null); setBefore(null); setCurrent(null);
-    setTable(DEFAULT_TABLE); setRowCount(5_000);
-    await engine.createTable(DEFAULT_TABLE, true);
-    setBusy('seed'); setProgress({ done: 0, total: 5_000 });
-    const r = await engine.seed({ table: DEFAULT_TABLE, rowCount: 5_000, seed: DEFAULT_SEED }, (done, total) => setProgress({ done, total }));
-    setProgress(null);
-    setSeedMsg(`Inserted ${r.rowsInserted.toLocaleString()} rows in ${Math.round(r.elapsedMs)} ms (measured).`);
-    const email = generateRow(DEFAULT_TABLE.columns, DEFAULT_SEED, 4_242)[2] as string;
-    const text = `SELECT * FROM users WHERE email = '${email}'`;
-    setSql(text);
-    await refreshSchema();
-    await runQuery(text);
-  }), [engine, refreshSchema, runQuery, run]);
+  /** Loads a definition into the editors without touching the database. */
+  const loadExperiment = useCallback((e: Experiment) => {
+    setTables(e.tables); setSeedValue(e.seed); setSql(e.sql);
+    setBefore(null); setCurrent(null); setQuery({ status: 'idle' }); setTableError(null); setSeedMsg(null);
+  }, []);
+
+  /** Create all tables, seed them, then run the experiment's SQL (its first plan is the "before"). */
+  const runExperiment = useCallback((e: Experiment) => run('table', async () => {
+    setNotice(null); loadExperiment(e);
+    await engine.createSchema(e.tables.map((t) => t.table), true);
+    setBusy('seed');
+    await doSeed(e.tables, e.seed);
+    await runQuery(e.sql);
+  }), [engine, doSeed, runQuery, loadExperiment, run]);
 
   const resetDatabase = useCallback(() => run('init', async () => {
     setInfo(await engine.reset());
@@ -136,11 +134,14 @@ export function useLab() {
     setProgress(null); setSeedMsg(null); setNotice('Database reset. It is empty again.');
   }), [engine, run]);
 
+  const toExperiment = useCallback((name: string): Experiment => ({ version: EXPERIMENT_VERSION, name, tables, seed: seedValue, sql }), [tables, seedValue, sql]);
+
   return {
-    info, schema, busy, notice, setNotice, table, setTable, tableError, rowCount, setRowCount, progress, seedMsg,
-    sql, setSql, query, current, before, benchmarkable: isBenchmarkable(sql),
-    createTable, seed, runQuery, compareWithIndex, dropIndex, runGuided, resetDatabase,
-    cancel: () => engine.cancel(), indexName,
+    info, schema, busy, notice, setNotice, tables, setTables, tableError, schemaIssues, existing,
+    seedValue, setSeedValue, progress, seedMsg, sql, setSql, query, current, before,
+    benchRuns, setBenchRuns, benchmarkable: isBenchmarkable(sql),
+    createSchema, seed, runQuery, compareWithIndex, dropIndex, loadExperiment, runExperiment, toExperiment,
+    runGuided: () => runExperiment(GUIDED_EXAMPLE), resetDatabase, cancel: () => engine.cancel(),
   };
 }
 

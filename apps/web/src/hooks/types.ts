@@ -16,6 +16,8 @@ export interface PlanSnapshot {
   sql: string;
   plan: RawPlanRow[] | null;
   planError?: string;
+  /** Why no plan is shown (e.g. the statement is DDL), as opposed to an error. */
+  planNote?: string;
   timing: TimingSummary;
   totalRows: number;
   indexes: string[];
