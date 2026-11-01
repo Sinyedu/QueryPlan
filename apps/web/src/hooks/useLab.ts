@@ -63,12 +63,11 @@ export function useLab() {
     await refreshSchema();
   }, (m) => setSeedMsg(`Seed failed: ${m}`)).finally(() => setProgress(null)), [engine, table, rowCount, refreshSchema, run]);
 
-  /** Executes `text` several times and returns a timing summary plus the last result. */
+  /** One discarded warm-up run, then `runs` timed executions; returns a timing summary plus the last result. */
   const bench = useCallback(async (text: string, runs: number) => {
     const samples: number[] = [];
     let last = await engine.execute(text, QUERY_LIMITS);
-    samples.push(last.elapsedMs);
-    for (let i = 1; i < runs; i++) { last = await engine.execute(text, QUERY_LIMITS); samples.push(last.elapsedMs); }
+    for (let i = 0; i < runs; i++) { last = await engine.execute(text, QUERY_LIMITS); samples.push(last.elapsedMs); }
     return { last, timing: summarizeTimes(samples) };
   }, [engine]);
 

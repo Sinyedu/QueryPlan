@@ -8,6 +8,7 @@
     "build": "pnpm --filter web build",
     "preview": "pnpm --filter web preview",
     "test": "pnpm --filter web test",
-    "typecheck": "pnpm --filter web typecheck"
+    "typecheck": "pnpm --filter web typecheck",
+    "lint": "pnpm --filter web lint"
   }
 }
