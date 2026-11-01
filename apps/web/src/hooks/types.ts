@@ -28,4 +28,4 @@ export interface SeedProgress {
   total: number;
 }
 
-export const QUERY_LIMITS = { maxRows: 200, timeoutMs: 10_000 } as const;
+export const QUERY_TIMEOUT_MS = 10_000;

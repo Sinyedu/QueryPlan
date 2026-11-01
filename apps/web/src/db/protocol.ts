@@ -12,7 +12,7 @@ export interface EngineInfo {
 }
 
 export interface ExecuteOptions {
-  /** Max rows returned to the UI (the rest are counted, not materialized). */
+  /** Max rows returned to the UI (the rest are counted, not materialized). Clamped to [0, MAX_ROW_LIMIT] by the engine. */
   maxRows: number;
   /** Cooperative in-worker time budget; the client adds a hard watchdog on top. */
   timeoutMs: number;
@@ -28,6 +28,8 @@ export interface ExecuteResult {
   /** Rows the statement produced in total (may exceed rows.length). */
   totalRows: number;
   truncated: boolean;
+  /** True when rows were also cut short by the returned-data byte budget, not only by the row limit. */
+  byteLimited: boolean;
   rowsAffected: number | null;
   /** Wall-clock time of the whole execution inside the worker (includes counting all rows). */
   elapsedMs: number;
